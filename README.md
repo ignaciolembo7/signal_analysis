@@ -193,6 +193,21 @@ PARAMS_XLSX=/path/to/sequence_parameters.xlsx \
   bash signal_analysis/bash_template/run_dataset.sh phantom ogse ingest
 ```
 
+The ingest step uses the matched `sequence_parameters` row to attach acquisition
+metadata and, when needed, to resolve the result-table layout. Layout resolution
+is tried in this order:
+
+1. Legacy filename tokens such as `10bval_6dir`.
+2. Optional `sequence_parameters` columns: `ndirs` and `nbvals`.
+3. The canonical Balseiro signal-extraction table shape: 2 b0 rows followed by
+   60 data rows, interpreted as 6 directions by 10 b-values.
+
+For new result filenames such as
+`sub-BRAIN-1_ses-T0_acq-hz000d40b2000s5_results.xlsx`, adding `ndirs` and
+`nbvals` to the matching sequence-parameter row is the explicit, preferred
+metadata path. Existing files without those columns are still ingested through
+the table-shape fallback.
+
 ### Manifests
 
 Some downstream steps need explicit manifest CSV files. The runner selects the

@@ -7,6 +7,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ResultMeta:
+    subject_id: str | None
     sheet: str | None
     seq: int | None
     Hz: float | None
@@ -63,6 +64,9 @@ def parse_results_filename(path: str | Path) -> ResultMeta:
             return None
         return float(m.group(1).replace("p", "."))
 
+    m_subject = re.search(r"(?:^|_)sub-([A-Za-z0-9.-]+)(?:_|$)", name, re.IGNORECASE)
+    subject_id = m_subject.group(1) if m_subject else None
+
     nbvals = _int(r"(\d+)bval")
     ndirs  = _int(r"(\d+)(?:ortho)?dir")
     group = _int(r"_(\d{3})_(?:NOGSE|PGSE)")
@@ -74,16 +78,25 @@ def parse_results_filename(path: str | Path) -> ResultMeta:
     delta_ms = _float(r"_d(\d+(?:\.\d+)?)") if re.search(r"_Delta", name, re.IGNORECASE) else None
     Delta_ms = _float(r"_Delta(\d+(?:\.\d+)?)")
 
-    # Legacy style: _d55 is used only when there is no _Delta token.
-    d_ms = _float_with_p(r"_d(\d+(?:p\d+|\.\d+)?)") if delta_ms is None else None
+    # Legacy/BIDS-acq style: _d55 or acq-hz000d40b2000s5 are max_dur_ms.
+    d_ms = _float_with_p(r"(?:^|[_-])d(\d+(?:p\d+|\.\d+)?)") if delta_ms is None else None
+    if d_ms is None and delta_ms is None:
+        d_ms = _float_with_p(r"d(\d+(?:p\d+|\.\d+)?)b\d+")
 
     Hz   = _float(r"Hz(\d+(?:\.\d+)?)")
-    bmax = _float(r"_b(\d+(?:\.\d+)?)")
+    bmax = _float(r"(?:^|[_-])b(\d+(?:\.\d+)?)")
+    if bmax is None:
+        bmax = _float(r"d\d+(?:p\d+|\.\d+)?b(\d+(?:\.\d+)?)")
 
-    seq  = _int(r"_(\d+)_results")
+    seq = _int(r"_(\d+)_results")
+    if seq is None:
+        seq = _int(r"(?:^|[_-])s(\d+)(?:_|$)")
+    if seq is None:
+        seq = _int(r"b\d+(?:\.\d+)?s(\d+)(?:_|$)")
     encoding = "OGSE" if re.search(r"OGSE", name, re.IGNORECASE) else ("PGSE" if re.search(r"PGSE", name, re.IGNORECASE) else None)
 
     return ResultMeta(
+        subject_id=subject_id,
         sheet=sheet, seq=seq, Hz=Hz, bmax=bmax, group=group, G=G, TN=TN, N=N,
         d_ms=(float(d_ms) if d_ms is not None else None),
         delta_ms=delta_ms, Delta_ms=Delta_ms,
@@ -113,6 +126,21 @@ def _sequence_match_column(df: pd.DataFrame) -> str | None:
     return None
 
 
+def _filter_subject(df: pd.DataFrame, subject_id: str) -> pd.DataFrame:
+    if "subj" not in df.columns:
+        return df
+
+    # Match both exact subject ids (BRAIN-3) and legacy family ids (BRAIN).
+    family = re.sub(r"[-_]\d+$", "", str(subject_id).strip())
+    candidates = {
+        str(subject_id).strip().upper(),
+        family.upper(),
+    }
+    values = df["subj"].astype(str).str.strip().str.upper()
+    out = df[values.isin(candidates)]
+    return out if not out.empty else df
+
+
 def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | None:
     """
     Strict match policy:
@@ -127,13 +155,18 @@ def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | Non
     """
     df = params.copy()
 
-    # Strict sheet match
-    if meta.sheet is None or "sheet" not in df.columns:
+    if "sheet" not in df.columns:
         return None
 
-    target_sheet = str(meta.sheet).strip()
+    target_sheet = str(meta.sheet).strip() if meta.sheet is not None else ""
     sheet_values = df["sheet"].astype(str).str.strip()
-    df = df[sheet_values == target_sheet]
+    exact_sheet = df[sheet_values == target_sheet] if target_sheet else df.iloc[0:0]
+    if not exact_sheet.empty:
+        df = exact_sheet
+    elif meta.subject_id is not None:
+        df = _filter_subject(df, meta.subject_id)
+    else:
+        return None
 
     if df.empty:
         return None
@@ -169,6 +202,9 @@ def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | Non
         else:
             df = _filter_close(df, "Hz", float(Hz), atol=1e-6)
 
+    if meta.bmax is not None and "bmax" in df.columns:
+        df = _filter_close(df, "bmax", float(meta.bmax), atol=1e-3)
+
     # Timing fields
     if meta.delta_ms is not None and "delta_ms" in df.columns:
         df = _filter_close(df, "delta_ms", float(meta.delta_ms), atol=1e-3)
@@ -187,9 +223,9 @@ def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | Non
 
     if len(df) > 1:
         raise ValueError(
-            "More than one parameter row matched inside the exact sheet. "
+            "More than one parameter row matched. "
             "Refine the metadata or make the Excel table more specific.\n"
-            f"sheet={target_sheet!r}, seq={meta.seq}, Hz={meta.Hz}, d_ms={meta.d_ms}, "
+            f"sheet={target_sheet!r}, subject_id={meta.subject_id!r}, seq={meta.seq}, Hz={meta.Hz}, d_ms={meta.d_ms}, "
             f"delta_ms={meta.delta_ms}, Delta_ms={meta.Delta_ms}"
         )
 

@@ -40,6 +40,124 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _norm_column_name(value: object) -> str:
+    return " ".join(str(value).strip().lower().replace("-", "_").split())
+
+
+def _positive_int(value: object) -> int | None:
+    parsed = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(parsed):
+        return None
+    as_float = float(parsed)
+    as_int = int(round(as_float))
+    if as_int <= 0 or not np.isclose(as_float, as_int, rtol=0.0, atol=1e-9):
+        return None
+    return as_int
+
+
+def _layout_value_from_params(row: pd.Series | None, candidates: list[str]) -> int | None:
+    if row is None:
+        return None
+
+    norm_map = {_norm_column_name(col): col for col in row.index}
+    for candidate in candidates:
+        col = norm_map.get(_norm_column_name(candidate))
+        if col is None:
+            continue
+        value = _positive_int(row[col])
+        if value is not None:
+            return value
+    return None
+
+
+def _infer_layout_from_table(
+    stats: dict[str, pd.DataFrame],
+    gradient_col: str,
+    *,
+    b0_reps: int = 2,
+) -> tuple[int | None, int | None]:
+    any_df = next(iter(stats.values()))
+    if gradient_col not in any_df.columns:
+        return None, None
+
+    values = pd.to_numeric(any_df[gradient_col], errors="coerce")
+    if values.isna().any():
+        values = values.dropna()
+    if values.empty:
+        return None, None
+
+    # Signal-extraction result tables store repeated b0/g0 rows first. The
+    # remaining rows are interleaved by direction within each b/g step.
+    data_rows = len(values) - b0_reps
+    if data_rows <= 0:
+        return None, None
+
+    nonzero = values[~np.isclose(values.to_numpy(float), 0.0, rtol=0.0, atol=1e-9)]
+    if nonzero.empty:
+        return None, None
+
+    counts = nonzero.groupby(nonzero).size().to_numpy()
+    if len(counts) > 0 and len(set(map(int, counts))) == 1:
+        ndirs = int(counts[0])
+        if ndirs > 0 and data_rows % ndirs == 0:
+            return ndirs, int(data_rows // ndirs)
+
+    # Current Balseiro signal-extraction BIDS files omit the legacy
+    # "10bval_6dir" token but keep the same 2 b0 + 60 data-row layout.
+    if data_rows == 60:
+        return 6, 10
+
+    nonzero_arr = nonzero.to_numpy(float)
+    first_value = float(nonzero_arr[0])
+    first_run = 0
+    for value in nonzero_arr:
+        if np.isclose(float(value), first_value, rtol=0.0, atol=1e-9):
+            first_run += 1
+        else:
+            break
+
+    if first_run <= 0 or data_rows % first_run != 0:
+        return None, None
+
+    return int(first_run), int(data_rows // first_run)
+
+
+def resolve_table_layout(
+    *,
+    stats: dict[str, pd.DataFrame],
+    results_file: Path,
+    params_row: pd.Series | None,
+    gradient_col: str,
+) -> tuple[int, int]:
+    meta = parse_results_filename(results_file)
+    layout = infer_layout_from_filename(results_file)
+
+    ndirs = (
+        meta.ndirs
+        or layout.ndirs
+        or _layout_value_from_params(params_row, ["ndirs", "n_dirs", "n directions", "n_directions", "directions"])
+    )
+    nbvals = (
+        meta.nbvals
+        or layout.nbvals
+        or _layout_value_from_params(params_row, ["nbvals", "n_bvals", "n bvals", "n_bvalues", "n bvalues", "bvals"])
+    )
+
+    inferred_ndirs, inferred_nbvals = _infer_layout_from_table(stats, gradient_col)
+    ndirs = ndirs or inferred_ndirs
+    nbvals = nbvals or inferred_nbvals
+
+    if ndirs is None or nbvals is None:
+        raise SystemExit(
+            f"Could not infer ndirs/nbvals for {results_file.name}. "
+            "Use a legacy filename containing '<N>bval_<N>dir', add ndirs/nbvals columns "
+            "to the matching sequence_parameters row, or provide a results table with repeated "
+            "non-zero gradient values that allow safe inference."
+        )
+
+    return int(ndirs), int(nbvals)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("results_file", type=Path)
@@ -69,16 +187,25 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def result_tables_to_long(stats: dict[str, pd.DataFrame], results_file: Path) -> tuple[pd.DataFrame, str]:
+def result_tables_to_long(
+    stats: dict[str, pd.DataFrame],
+    results_file: Path,
+    *,
+    params_row: pd.Series | None = None,
+) -> tuple[pd.DataFrame, str]:
     gradient_input_kind = detect_gradient_input_kind(stats)
-    meta = parse_results_filename(results_file)
 
     if gradient_input_kind == "b":
-        layout = infer_layout_from_filename(results_file)
-        ndirs = meta.ndirs or layout.ndirs
-        nbvals = meta.nbvals or layout.nbvals
-        if ndirs is None or nbvals is None:
-            raise SystemExit(f"Could not infer ndirs/nbvals from filename: {results_file.name}")
+        any_df = next(iter(stats.values()))
+        bcol = first_present([str(c) for c in any_df.columns], ["bvalues", "bvalue", "bval", "b"])
+        if bcol is None:
+            raise SystemExit(f"Could not find a b column in: {list(any_df.columns)}")
+        ndirs, nbvals = resolve_table_layout(
+            stats=stats,
+            results_file=results_file,
+            params_row=params_row,
+            gradient_col=bcol,
+        )
         return to_long(stats, ndirs=ndirs, nbvals=nbvals, source_file=results_file.name), gradient_input_kind
 
     if is_single_point_results(stats):
@@ -89,17 +216,17 @@ def result_tables_to_long(stats: dict[str, pd.DataFrame], results_file: Path) ->
             gradient_input_kind,
         )
 
-    layout = infer_layout_from_filename(results_file)
-    ndirs = meta.ndirs or layout.ndirs
-    nbvals = meta.nbvals or layout.nbvals
-    if ndirs is None or nbvals is None:
-        raise SystemExit(f"Could not infer ndirs/nbvals from filename: {results_file.name}")
-
     any_df = next(iter(stats.values()))
     gcol = first_present([str(c) for c in any_df.columns], ["gvalues", "gval", "g"])
     if gcol is None:
         raise SystemExit(f"Could not find a g column in: {list(any_df.columns)}")
 
+    ndirs, nbvals = resolve_table_layout(
+        stats=stats,
+        results_file=results_file,
+        params_row=params_row,
+        gradient_col=gcol,
+    )
     df_long = to_long(
         stats,
         ndirs=ndirs,
@@ -227,8 +354,6 @@ def main() -> None:
     stats = read_result_xls(args.results_file)
     meta = parse_results_filename(args.results_file)
 
-    df_long, gradient_input_kind = result_tables_to_long(stats, args.results_file)
-
     params = read_sequence_params_xlsx(args.params_xlsx)
     row = select_params_row(params, meta)
     if row is None:
@@ -238,6 +363,8 @@ def main() -> None:
             f"delta_ms={meta.delta_ms}, Delta_ms={meta.Delta_ms}"
         )
         return
+
+    df_long, gradient_input_kind = result_tables_to_long(stats, args.results_file, params_row=row)
 
     clean_params = extract_clean_sequence_params(row, meta)
     df_long = add_clean_sequence_params(df_long, clean_params)

@@ -70,7 +70,8 @@ def read_sequence_params_xlsx(path: str | Path) -> pd.DataFrame:
         for c in [
             "seq", "Hz", "bmax", "delta_ms", "delta_app_ms", "N",
             "group", "G", "TN", "x", "y",
-            "g_thorsten", "max_dur_ms", "TE_ms", "TR_ms", "TM_ms"
+            "g_thorsten", "max_dur_ms", "TE_ms", "TR_ms", "TM_ms",
+            "ndirs", "nbvals", "n_dirs", "n_bvals",
         ]:
             if c in sub.columns:
                 sub[c] = pd.to_numeric(sub[c], errors="coerce")
