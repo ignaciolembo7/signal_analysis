@@ -54,8 +54,8 @@ def _select_bvalue_and_bstep(
     if selected_bstep > len(ordered):
         raise ValueError(
             "selected_bstep="
-            f"{selected_bstep} fuera de rango para {group_label}. "
-            f"Solo hay {len(ordered)} bsteps disponibles: {list(map(float, ordered))}"
+            f"{selected_bstep} is out of range for {group_label}. "
+            f"Only {len(ordered)} bsteps are available: {list(map(float, ordered))}"
         )
     return float(ordered[selected_bstep - 1]), int(selected_bstep)
 
