@@ -1,0 +1,105 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+**/__pycache__/
+*.py[cod]
+**/*.py[cod]
+*.pyd
+*$py.class
+*.so
+.Python
+
+# Build / packaging
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =========================
+# Virtual environments
+# =========================
+.env
+.venv/
+venv/
+env/
+nogse_pipe_env/
+
+# =========================
+# Testing / coverage
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# =========================
+# Notebooks
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# IDE / Editor / OS
+# =========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+nohup.out
+
+# =========================
+# Neuroimaging / scientific data
+# =========================
+Data*/
+Results/
+trash/
+plots/
+ogse_experiments/
+
+*.nii
+*.nii.gz
+*.mgz
+*.bval
+*.bvec
+*.mat
+
+# =========================
+# Office temporary files
+# =========================
+~$*.xls*
+~$*.xlsx
+
+# Automatically generated CSV / parquet files
+# Uncomment if you do NOT want to version output tables
+*.csv
+*.parquet
+!bash_template/manifests/**/*.csv
+!bash_template_2/manifests/**/*.csv
+
+# Jupyter
+*.ipynb_checkpoints
+
+# Misc
+*.tmp
+*.bak
+.nfs*
+
+# Bash 
+bash/

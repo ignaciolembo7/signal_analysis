@@ -1,0 +1,25 @@
+[project]
+name = "signal_analysis"
+version = "1.0.1"
+description = "Master-table ingestion, signal rotation, plotting, and summary analysis for signal_extraction outputs."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.6",
+    "numpy>=1.23",
+    "openpyxl>=3.1",
+    "pandas>=1.5",
+    "pyarrow>=16.0",
+    "scipy>=1.10",
+]
+
+[project.urls]
+Repository = "https://github.com/YOUR_USERNAME/signal_analysis"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
