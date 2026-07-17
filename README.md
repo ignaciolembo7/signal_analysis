@@ -537,22 +537,28 @@ MASTER_LAST_POINTS_BY_TD="120:8=6,120:4=4,210=8" \
 Phantom NOGSE:
 
 ```bash
-nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse ingest > logs/phantom_nogse_01_ingest.log 2>&1 &
+NOGSE_ONEG=1 nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse ingest > logs/phantom_nogse_01_ingest.log 2>&1 &
 nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse rotate > logs/phantom_nogse_02_rotate.log 2>&1 &
 nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse plot_signal > logs/phantom_nogse_03_plot_signal.log 2>&1 &
 nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse alpha > logs/phantom_nogse_06_alpha.log 2>&1 &
 ```
+Use `NOGSE_ONEG=1` for direct-g NOGSE phantom results where each
+`*_results.xlsx` file contributes one gradient point to a shared curve. Use
+`NOGSE_ONEG=0` or omit it only when each results file already contains a full
+multi-point curve. This flag is only needed during `ingest`; later steps read
+the `one_g_per_sequence` marker from `master.long.parquet`.
+
 
 Phantom NOGSE all-in-one core chain:
 
 ```bash
-nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse ingest rotate > logs/phantom_nogse_core.log 2>&1 &
+NOGSE_ONEG=1 nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse ingest rotate > logs/phantom_nogse_core.log 2>&1 &
 ```
 
 Phantom NOGSE filtered core chain:
 
 ```bash
-MASTER_LAST_POINTS_BY_TD="120:8=6,120:4=4,210=8" \
+NOGSE_ONEG=1 MASTER_LAST_POINTS_BY_TD="120:8=6,120:4=4,210=8" \
   nohup bash signal_analysis/bash_template/run_dataset.sh phantom nogse ingest filter_master_points rotate > logs/phantom_nogse_filtered.log 2>&1 &
 ```
 
@@ -721,6 +727,7 @@ any command:
 | `DWI_LEVEL` | `signal_extraction` DWI level used by `ingest`; default `den_gr-topup` |
 | `ROI_VARIANT` | `signal_extraction` ROI variant used by `ingest`; default `plain` |
 | `RESULTS_ROOT` / `--results-root` repeatable | Results folder or folders to ingest |
+| `NOGSE_ONEG` | Set to `1` during NOGSE direct-g `ingest` when each results file is one gradient point |
 | `PARAMS_XLSX` | Sequence-parameter Excel file; required for phantom `ingest` |
 | `ANALYSIS_ROOT` | Analysis output root; default `$PROJECT_ROOT/analysis/<brains\|phantoms>/<experiment>` |
 | `MASTER_PARQUET` | Master parquet to use or generate |
