@@ -2,12 +2,8 @@
 
 pipeline_setup_common() {
     MASTER_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [[ "$(basename "$(dirname "$MASTER_HELPER_DIR")")" == "manifests" ]]; then
-        TEMPLATE_ROOT="$(cd "$MASTER_HELPER_DIR/../.." && pwd)"
-    else
-        TEMPLATE_ROOT="$(cd "$MASTER_HELPER_DIR/.." && pwd)"
-    fi
-    REPO_ROOT="$(cd "$TEMPLATE_ROOT/.." && pwd)"
+    REPO_ROOT="$(cd "$MASTER_HELPER_DIR/.." && pwd)"
+    TEMPLATE_ROOT="$REPO_ROOT"
     PROJECT_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
     export PYTHONPATH="$REPO_ROOT/src:${PYTHONPATH:-}"
@@ -119,7 +115,7 @@ pipeline_apply_master_last_points() {
 pipeline_usage() {
     cat <<'EOF'
 Usage:
-  bash signal_analysis/bash_template/run_dataset.sh <type_subj> <type_seq> <step...>
+  bash signal_analysis/run_dataset.sh <type_subj> <type_seq> <step...>
 
 Run from:
   /mnt/storage/tier2/MUMI-EXT-001/mumi-data/Project-Balseiro-Microstructure
@@ -130,7 +126,7 @@ Subject and sequence:
   <type_seq>   ogse | nogse
 
 Equivalent option form:
-  bash signal_analysis/bash_template/run_dataset.sh --type-subj brain --type-seq ogse <step...>
+  bash signal_analysis/run_dataset.sh --type-subj brain --type-seq ogse <step...>
 
 Runner arguments:
   --type-subj brain|phantom   Select subject type.
@@ -146,12 +142,12 @@ How step arguments work:
   Step-specific settings are environment variables placed before the command:
 
     VAR=value OTHER_VAR=value \
-      bash signal_analysis/bash_template/run_dataset.sh brain ogse <step>
+      bash signal_analysis/run_dataset.sh brain ogse <step>
 
   Extra Python flags go through each step's *_EXTRA_ARGS variable:
 
     SIGNAL_FIT_EXTRA_ARGS="--fix_M0 1.0 --auto_fit_tol 0.05" \
-      bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal
+      bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
 Available steps:
   Data import:
@@ -187,9 +183,9 @@ Available steps:
     tc               Fit tc-vs-td summaries.
 
 Help for one step:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse ingest --help
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate --help
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal --help
+  bash signal_analysis/run_dataset.sh brain ogse ingest --help
+  bash signal_analysis/run_dataset.sh brain ogse rotate --help
+  bash signal_analysis/run_dataset.sh brain ogse fit_signal --help
 
 Common environment variables:
   PY                 Python interpreter.
@@ -222,33 +218,33 @@ Master table format:
 
 Examples:
   # Ingest one signal_extraction Results folder.
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse \
+  bash signal_analysis/run_dataset.sh brain ogse \
     --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results \
     ingest
 
   # Or ingest all Results folders under one DWI/ROI namespace.
   DWI_LEVEL=den_gr-topup ROI_VARIANT=sket1 \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse ingest
+    bash signal_analysis/run_dataset.sh brain ogse ingest
 
   # Run the next core steps after ingest.
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate contrast
+  bash signal_analysis/run_dataset.sh brain ogse rotate contrast
 
   # Filter a rotate step by subject/sheet.
   MASTER_SUBJ=BRAIN MASTER_SHEET=20220622_BRAIN \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate
+    bash signal_analysis/run_dataset.sh brain ogse rotate
 
   # Plot one ROI/direction.
   PLOT_ROI=Left-Lateral-Ventricle PLOT_DIRECTION=long \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse plot_signal
+    bash signal_analysis/run_dataset.sh brain ogse plot_signal
 
   # Fit signals with extra Python options.
   SIGNAL_FIT_MODEL=monoexp \
   SIGNAL_FIT_EXTRA_ARGS="--fix_M0 1.0" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
   # Run several steps from PIPELINE_STEPS instead of positional step names.
   PIPELINE_STEPS="rotate contrast fit_signal fit_contrast extract_tc_peak tc" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse
+    bash signal_analysis/run_dataset.sh brain ogse
 EOF
 }
 
@@ -282,19 +278,19 @@ Variables for this step:
   PROCESS_OUT_ROOT    Per-file table output root. Default: $ANALYSIS_ROOT/data/tables
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse \
+  bash signal_analysis/run_dataset.sh brain ogse \
     --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results \
     ingest
 
   RESULTS_ROOTS="Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-LUDG-3/ses-T0/Results" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse ingest
+    bash signal_analysis/run_dataset.sh brain ogse ingest
 
   DWI_LEVEL=den_gr-topup ROI_VARIANT=sket1 \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse ingest
+    bash signal_analysis/run_dataset.sh brain ogse ingest
 
   PARAMS_XLSX=Data-signals/sequence_parameters_brains.xlsx \
   RESULTS_GLOB="*_results.xlsx" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse ingest
+    bash signal_analysis/run_dataset.sh brain ogse ingest
 EOF
             ;;
         filter_master_points)
@@ -328,14 +324,14 @@ Note:
 Examples:
   # Keep last 6 points at td=120 N=8, last 4 at td=120 N=4, last 8 at td=210 (all N)
   MASTER_LAST_POINTS_BY_TD="120:8=6,120:4=4,210=8" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse filter_master_points
+    bash signal_analysis/run_dataset.sh brain ogse filter_master_points
 
   # Keep all points at td=90, last 6 at td=120 (all N)
   MASTER_LAST_POINTS_BY_TD="120=6,90=ALL" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse filter_master_points
+    bash signal_analysis/run_dataset.sh brain ogse filter_master_points
 
   MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate contrast fit_signal
+    bash signal_analysis/run_dataset.sh brain ogse rotate contrast fit_signal
 EOF
             ;;
         export_master_xlsx)
@@ -355,11 +351,11 @@ Variables for this step:
   EXPORT_MASTER_SCRIPT     Python script override.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse export_master_xlsx
+  bash signal_analysis/run_dataset.sh brain ogse export_master_xlsx
 
   MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet \
   MASTER_XLSX=analysis/brains/ogse_experiments/master.last_points.xlsx \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse export_master_xlsx
+    bash signal_analysis/run_dataset.sh brain ogse export_master_xlsx
 EOF
             ;;
         rotate)
@@ -391,20 +387,20 @@ Useful ROTATE_EXTRA_ARGS:
   --b_col bvalue
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate
+  bash signal_analysis/run_dataset.sh brain ogse rotate
 
   MASTER_SUBJ=BRAIN \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate
+    bash signal_analysis/run_dataset.sh brain ogse rotate
 
   MASTER_SHEET=20220622_BRAIN \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate
+    bash signal_analysis/run_dataset.sh brain ogse rotate
 
   MASTER_SUBJ=BRAIN \
   MASTER_SHEET=20220622_BRAIN \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate
+    bash signal_analysis/run_dataset.sh brain ogse rotate
 
   ROTATE_EXTRA_ARGS="--s0_mode mean" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse rotate
+    bash signal_analysis/run_dataset.sh brain ogse rotate
 EOF
             ;;
         contrast)
@@ -441,14 +437,14 @@ Useful MAKE_CONTRAST_EXTRA_ARGS:
       Select rotated or raw signal rows from master. Default: --master-rotated.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse contrast
+  bash signal_analysis/run_dataset.sh brain ogse contrast
 
-  CONTRAST_MANIFEST=signal_analysis/bash_template/manifests/brains_ogse/contrasts.csv \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse contrast
+  CONTRAST_MANIFEST=signal_analysis/manifests/brains_ogse/contrasts.csv \
+    bash signal_analysis/run_dataset.sh brain ogse contrast
 
   # Direct contrast with gradient correction
   MAKE_CONTRAST_EXTRA_ARGS="--apply_grad_corr" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse contrast
+    bash signal_analysis/run_dataset.sh brain ogse contrast
 EOF
             ;;
         contrast_resampled)
@@ -483,7 +479,7 @@ Variables for this step:
 
 Examples:
   SIGNAL_FIT_OUT_ROOT=analysis/brains/ogse_experiments/fits/ogse_signal_ogse_mixed_offset \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse contrast_resampled
+    bash signal_analysis/run_dataset.sh brain ogse contrast_resampled
 EOF
             ;;
         plot_signal)
@@ -514,13 +510,13 @@ Variables for this step:
   PLOT_SIGNAL_EXTRA_ARGS  Extra plot_<type_seq>_signal_vs_g.py options.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse plot_signal
+  bash signal_analysis/run_dataset.sh brain ogse plot_signal
 
   PLOT_ROI=Left-Lateral-Ventricle PLOT_DIRECTION=long \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse plot_signal
+    bash signal_analysis/run_dataset.sh brain ogse plot_signal
 
   PLOT_SUBJ=20220622_BRAIN PLOT_DIRECTION="long" PLOT_SIGNAL_XCOL=g_thorsten \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse plot_signal
+    bash signal_analysis/run_dataset.sh brain ogse plot_signal
 EOF
             ;;
         fit_signal|fit_signal_gradcorr)
@@ -617,21 +613,21 @@ Useful SIGNAL_FIT_EXTRA_ARGS (NOGSE):
   --alpha_td_tol_ms F   Tolerance (ms) for td_ms matching. Default: 0.001.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal
+  bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
-  SIGNAL_FIT_MANIFEST=signal_analysis/bash_template/manifests/brains_ogse/signal_fits.csv \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal
+  SIGNAL_FIT_MANIFEST=signal_analysis/manifests/brains_ogse/signal_fits.csv \
+    bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
   # Monoexp with automatic point selection
   SIGNAL_FIT_EXTRA_ARGS="--auto_fit_points --auto_fit_tol 0.05" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
   # ogse_free with gradient correction
   SIGNAL_FIT_MODEL=ogse_free \
   SIGNAL_FIT_EXTRA_ARGS="--apply_grad_corr --D0_init 0.0023" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_signal_gradcorr
+  bash signal_analysis/run_dataset.sh brain ogse fit_signal_gradcorr
 EOF
             ;;
         fit_contrast|fit_contrast_free|fit_contrast_mixed_global)
@@ -755,25 +751,25 @@ Useful FIT_EXTRA_ARGS (OGSE and NOGSE):
   --oneg                      Allow one-g-per-sequence contrast tables.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_contrast_free
+  bash signal_analysis/run_dataset.sh brain ogse fit_contrast_free
 
   FIT_MODEL=ogse_free \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_contrast
+    bash signal_analysis/run_dataset.sh brain ogse fit_contrast
 
   FIT_MODEL=ogse_mixed FIT_GBASE=g_lin_max FIT_YCOL=value_norm \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_contrast
+    bash signal_analysis/run_dataset.sh brain ogse fit_contrast
 
   # Fit with gradient correction applied during fitting
   FIT_EXTRA_ARGS="--apply_grad_corr" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_contrast
+    bash signal_analysis/run_dataset.sh brain ogse fit_contrast
 
   # Fix D0 and restrict tc range
   FIT_EXTRA_ARGS="--fix_D0 3.2e-12 --tc_bounds 0.5 200.0" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_contrast_free
+    bash signal_analysis/run_dataset.sh brain ogse fit_contrast_free
 
   # Jointly fit tc across all td curves
   FIT_EXTRA_ARGS="--global_params tc_ms" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_contrast_free
+    bash signal_analysis/run_dataset.sh brain ogse fit_contrast_free
 EOF
             ;;
         fit_global_signal)
@@ -866,34 +862,34 @@ Variables for this step:
   GLOBAL_SIGNAL_EXTRA_ARGS       Extra fit_global_signal.py options (e.g. --tc_init 5.0).
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+  bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # ogse_mixed_offset with RN fixed at 10 (grad correction on by default):
   GLOBAL_SIGNAL_RN_MODE=fixed \
   GLOBAL_SIGNAL_RN_FIXED=10 \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # ogse_rest (no alpha, no RN, no C): only TC and M0 modes apply
   GLOBAL_SIGNAL_MODEL=ogse_rest \
   GLOBAL_SIGNAL_TC_MODE=global_td \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # run without grad correction
   GLOBAL_SIGNAL_APPLY_GRAD_CORR=false \
   GLOBAL_SIGNAL_OUT_ROOT="analysis/brains/ogse_experiments/fits/ogse_signal_ogse_mixed_offset_raw" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # use a custom manifest (e.g. only N=8/N=4 pairs at td=90 for specific ROIs)
   GLOBAL_SIGNAL_MANIFEST="my_manifests/subset_contrasts.csv" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # fit all signal rows without manifest filtering
   GLOBAL_SIGNAL_MANIFEST=none \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # restrict to specific ROIs/directions
   GLOBAL_SIGNAL_DIRECTIONS="long tra" GLOBAL_SIGNAL_ROIS="Left-Lateral-Ventricle AntCC" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse fit_global_signal
+    bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 EOF
             ;;
         grad_correction)
@@ -938,16 +934,16 @@ Useful GRAD_CORR_EXTRA_ARGS:
   --no-fill-missing        Skip the cross-subject fill for sessions without a syringe.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse grad_correction
+  bash signal_analysis/run_dataset.sh brain ogse grad_correction
 
-  bash signal_analysis/bash_template/run_dataset.sh phantoms ogse grad_correction
+  bash signal_analysis/run_dataset.sh phantoms ogse grad_correction
 
   GRAD_CORR_ROI=Water2 \
-    bash signal_analysis/bash_template/run_dataset.sh phantoms ogse grad_correction
+    bash signal_analysis/run_dataset.sh phantoms ogse grad_correction
 
-  GRAD_CORR_MANIFEST=signal_analysis/bash_template/manifests/brains_ogse/grad_correction.csv \
+  GRAD_CORR_MANIFEST=signal_analysis/manifests/brains_ogse/grad_correction.csv \
   GRAD_CORR_EXTRA_ARGS="--bbase bvalue_thorsten --fix-M0 1.0" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse grad_correction
+    bash signal_analysis/run_dataset.sh brain ogse grad_correction
 EOF
             ;;
         plot_monoexp_d)
@@ -969,7 +965,7 @@ Variables for this step:
 
 Examples:
   SIGNAL_FITS_ROOT=analysis/brains/ogse_experiments/fits/master/ogse_value_norm_vs_bvaluethorsten_monoexp \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse plot_monoexp_d
+    bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d
 EOF
             ;;
         alpha)
@@ -1033,18 +1029,18 @@ Outputs:
   $ALPHA_OUT_DIR/<subj>/<roi>/<dir>_*.png       per-group D vs Delta_app curves
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse alpha
+  bash signal_analysis/run_dataset.sh brain ogse alpha
 
   ALPHA_N=1 \
   ALPHA_EXTRA_ARGS="--bvalmax 5 --roi-bvalmax AntCC=7 --roi-bvalmax CSF=3 --dirs long tra" \
   DPROJ_DIRS="long tra" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse alpha
+    bash signal_analysis/run_dataset.sh brain ogse alpha
 
   # Restrict plots to a subset of ROIs while keeping the full summary
   ALPHA_EXTRA_ARGS="--bvalmax 5 --roi-bvalmax Syringe=7" \
   DPROJ_DIRS="long tra" \
   DPROJ_ROIS="AntCC MidCC" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse alpha
+    bash signal_analysis/run_dataset.sh brain ogse alpha
 EOF
             ;;
         extract_tc_peak)
@@ -1090,12 +1086,12 @@ Variables for this step:
   TC_PEAKS_EXTRA_ARGS       Extra plot_ogse-contrast_tc_peak_panels.py options.
 
 Examples:
-  bash signal_analysis/bash_template/run_dataset.sh brain ogse extract_tc_peak
+  bash signal_analysis/run_dataset.sh brain ogse extract_tc_peak
 
   # Filter to specific models/ROIs
   TC_PEAK_MODELS="ogse_free ogse_tort" \
   TC_PEAKS_ROIS="AntCC MidCC" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse extract_tc_peak
+    bash signal_analysis/run_dataset.sh brain ogse extract_tc_peak
 EOF
             ;;
         tc)
@@ -1127,14 +1123,14 @@ Examples:
   TC_FIT_PARAMS="fits/master/ogse_.../fit_params.*.parquet" \
   TC_METHOD=pseudohuber_fixed_macro \
   TC_EXTRA_ARGS="--summary-alpha analysis/brains/ogse_experiments/alpha_macro/master/summary_alpha_values.xlsx" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse tc
+    bash signal_analysis/run_dataset.sh brain ogse tc
 
   # linear fit on resampled tc_peak
   TC_FIT_PARAMS="fits/master/ogse_.../fit_params.*.parquet" \
   TC_METHOD=linear \
   TC_Y_COL=tc_peak_resampled_ms \
   TC_OUT_DIR="analysis/brains/ogse_experiments/fits/tc_vs_td_resampled_master" \
-    bash signal_analysis/bash_template/run_dataset.sh brain ogse tc
+    bash signal_analysis/run_dataset.sh brain ogse tc
 EOF
             ;;
         *)

@@ -30,7 +30,7 @@ def main() -> None:
     ap.add_argument(
         '--manifest', required=True,
         help='CSV manifest with columns subj,sheet,roi,direction,td_ms,N[,Hz,model]. '
-             'Typically bash_template/manifests/<dataset>/grad_correction.csv.',
+             'Typically manifests/<dataset>/grad_correction.csv.',
     )
     ap.add_argument(
         '--master-parquet', type=Path, required=True,
