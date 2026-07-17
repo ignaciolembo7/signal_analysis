@@ -6,7 +6,7 @@ summary analysis for `signal_extraction` outputs.
 This repository consumes canonical pipeline outputs from:
 
 - `Data-BIDS/derivatives/signal_extraction/<DWI_LEVEL>/<ROI_VARIANT>/sub-*/ses-*/Results/`
-- sequence-parameter workbooks under `Data-signals/`
+- sequence-parameter workbooks under `Data-BIDS/`
 - step manifests under `signal_analysis/manifests/`
 
 It writes analysis products under:
@@ -70,12 +70,11 @@ signal_analysis/
 ```
 
 Run commands from `PROJECT_ROOT`, the directory that contains `Data-BIDS/`,
-`Data-signals/`, `analysis/`, and the sibling pipeline repositories:
+`analysis/`, and the sibling pipeline repositories:
 
 ```text
 PROJECT_ROOT/
 ├── Data-BIDS/
-├── Data-signals/
 ├── analysis/
 ├── dicom_to_bids/
 ├── img_preprocessing/
@@ -183,8 +182,8 @@ The ingest step matches result rows against sequence-parameter Excel workbooks:
 
 | Dataset | Default workbook |
 |---|---|
-| `brain` | `Data-signals/sequence_parameters_brains.xlsx` |
-| `phantom` | `Data-signals/sequence_parameters_phantoms.xlsx` |
+| `brain` | `Data-BIDS/sequence_parameters_brains.xlsx` |
+| `phantom` | `Data-BIDS/sequence_parameters_phantoms.xlsx` |
 
 Override with:
 
@@ -399,7 +398,7 @@ nohup bash signal_analysis/run_dataset.sh brain ogse ingest rotate grad_correcti
 Phantom OGSE:
 
 ```bash
-PARAMS_XLSX=Data-signals/sequence_parameters_phantoms.xlsx \
+PARAMS_XLSX=Data-BIDS/sequence_parameters_phantoms.xlsx \
 nohup bash signal_analysis/run_dataset.sh phantom ogse ingest rotate grad_correction \
   > logs/phantom_core.log 2>&1 &
 ```
@@ -432,7 +431,7 @@ each one often needs its own filters and extra arguments.
 Unfiltered run:
 
 ```bash
-PARAMS_XLSX=Data-signals/sequence_parameters_phantoms.xlsx nohup bash signal_analysis/run_dataset.sh phantom ogse ingest > logs/01_ingest.log 2>&1 &
+PARAMS_XLSX=Data-BIDS/sequence_parameters_phantoms.xlsx nohup bash signal_analysis/run_dataset.sh phantom ogse ingest > logs/01_ingest.log 2>&1 &
 ROTATE_EXTRA_ARGS="--solver solve" nohup bash signal_analysis/run_dataset.sh phantom ogse rotate > logs/02_rotate.log 2>&1 &
 nohup bash signal_analysis/run_dataset.sh phantom ogse plot_signal > logs/03_plot_signal.log 2>&1 &
 nohup bash signal_analysis/run_dataset.sh phantom ogse grad_correction > logs/05_grad_correction.log 2>&1 &
@@ -443,7 +442,7 @@ nohup bash signal_analysis/run_dataset.sh phantom ogse alpha > logs/06_alpha.log
 All-in-one core chain:
 
 ```bash
-PARAMS_XLSX=Data-signals/sequence_parameters_phantoms.xlsx \
+PARAMS_XLSX=Data-BIDS/sequence_parameters_phantoms.xlsx \
   nohup bash signal_analysis/run_dataset.sh phantom ogse ingest rotate grad_correction > logs/phantom_core.log 2>&1 &
 ```
 
@@ -723,7 +722,7 @@ any command:
 | Variable | Description |
 |---|---|
 | `PY` | Python interpreter |
-| `SIGNALS_ROOT` | Root containing sequence-parameter Excel files; default `$PROJECT_ROOT/Data-signals` |
+| `SIGNALS_ROOT` | Root containing sequence-parameter Excel files; default `$PROJECT_ROOT/Data-BIDS` |
 | `DWI_LEVEL` | `signal_extraction` DWI level used by `ingest`; default `den_gr-topup` |
 | `ROI_VARIANT` | `signal_extraction` ROI variant used by `ingest`; default `plain` |
 | `RESULTS_ROOT` / `--results-root` repeatable | Results folder or folders to ingest |

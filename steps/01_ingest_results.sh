@@ -78,7 +78,7 @@ for root in $roots; do
             "$PY" "$PROCESS_SCRIPT" "$file" "$PARAMS_XLSX" \
                 --out_dir "$PROCESS_OUT_ROOT" \
                 --master-parquet "$MASTER_PARQUET"
-        done < <(find "$d" -type f -name "$RESULTS_GLOB" | sort)
+        done < <(find "$d" -maxdepth 1 -type f -name "$RESULTS_GLOB" | sort)
     done
 done
 

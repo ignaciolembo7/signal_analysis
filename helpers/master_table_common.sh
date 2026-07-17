@@ -51,7 +51,7 @@ pipeline_set_dataset_defaults() {
     TYPE_SUBJ="${dataset%s}"
     TYPE_SEQ="$type_seq"
     EXPERIMENT_ROOT_NAME="${type_seq}_experiments"
-    SIGNALS_ROOT="${SIGNALS_ROOT:-$PROJECT_ROOT/Data-signals}"
+    SIGNALS_ROOT="${SIGNALS_ROOT:-$PROJECT_ROOT/Data-BIDS}"
     DWI_LEVEL="${DWI_LEVEL:-den_gr-topup}"
     ROI_VARIANT="${ROI_VARIANT:-plain}"
     RESULTS_ROOT="${RESULTS_ROOT:-$PROJECT_ROOT/Data-BIDS/derivatives/signal_extraction/$DWI_LEVEL/$ROI_VARIANT}"
@@ -189,7 +189,7 @@ Help for one step:
 
 Common environment variables:
   PY                 Python interpreter.
-  SIGNALS_ROOT       Root containing sequence parameter workbooks.
+  SIGNALS_ROOT       Root containing sequence parameter workbooks. Default: Data-BIDS.
   DWI_LEVEL          signal_extraction DWI level. Default: den_gr-topup.
   ROI_VARIANT        signal_extraction ROI variant. Default: plain.
   PARAMS_XLSX        Sequence-parameter workbook.
@@ -288,7 +288,7 @@ Examples:
   DWI_LEVEL=den_gr-topup ROI_VARIANT=sket1 \
     bash signal_analysis/run_dataset.sh brain ogse ingest
 
-  PARAMS_XLSX=Data-signals/sequence_parameters_brains.xlsx \
+  PARAMS_XLSX=Data-BIDS/sequence_parameters_brains.xlsx \
   RESULTS_GLOB="*_results.xlsx" \
     bash signal_analysis/run_dataset.sh brain ogse ingest
 EOF
