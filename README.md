@@ -5,20 +5,20 @@ summary analysis for `signal_extraction` outputs.
 
 This repository consumes canonical pipeline outputs from:
 
-- `Data-BIDS/derivatives/signal_extraction/<DWI_LEVEL>/<ROI_VARIANT>/sub-*/ses-*/Results/`
+- `Data-BIDS/derivatives/signal_extraction/<SIGNAL_EXTRACTION_TAG>/sub-*/ses-*/Results/`
 - sequence-parameter workbooks under `Data-BIDS/`
 - step manifests under `signal_analysis/manifests/`
 
 It writes analysis products under:
 
 ```text
-analysis/<brains|phantoms>/<ogse_experiments|nogse_experiments>/
+analysis/<SIGNAL_EXTRACTION_TAG>--<brains|phantoms>/<ogse_experiments|nogse_experiments>/
 ```
 
 The canonical table is:
 
 ```text
-analysis/<brains|phantoms>/<experiment>/master.long.parquet
+analysis/<SIGNAL_EXTRACTION_TAG>--<brains|phantoms>/<experiment>/master.long.parquet
 ```
 
 Excel files are exported only for inspection. The pipeline appends, filters,
@@ -140,18 +140,20 @@ chmod +x signal_analysis/run_dataset.sh \
 
 ### Signal Extraction Results
 
-`ingest` reads result workbooks from the canonical `signal_extraction` layout:
+`ingest` reads result workbooks from the canonical flat `signal_extraction`
+layout:
 
 ```text
-Data-BIDS/derivatives/signal_extraction/<DWI_LEVEL>/<ROI_VARIANT>/sub-<SUBJECT_ID>/ses-<SESSION_ID>/Results/*_results.xlsx
+Data-BIDS/derivatives/signal_extraction/<SIGNAL_EXTRACTION_TAG>/sub-<SUBJECT_ID>/ses-<SESSION_ID>/Results/*_results.xlsx
 ```
 
-By default:
+By default, `SIGNAL_EXTRACTION_TAG` is built as
+`<DWI_LEVEL>--<ROI_VARIANT>`:
 
 ```text
-DWI_LEVEL=den_gr-topup
-ROI_VARIANT=plain
-RESULTS_ROOT=Data-BIDS/derivatives/signal_extraction/$DWI_LEVEL/$ROI_VARIANT
+brains:   DWI_LEVEL=den_gr-topup, ROI_VARIANT=plain  -> den_gr-topup--plain
+phantoms: DWI_LEVEL=raw,          ROI_VARIANT=manual -> raw--manual
+RESULTS_ROOT=Data-BIDS/derivatives/signal_extraction/$SIGNAL_EXTRACTION_TAG
 ```
 
 Examples:
@@ -171,12 +173,14 @@ To ingest one explicit `Results` folder:
 
 ```bash
 bash signal_analysis/run_dataset.sh brain ogse \
-  --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results \
+  --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup--sket1/sub-MBBL-3/ses-T0/Results \
   ingest
 ```
 
-The old nested layout `Results/<subject>` is not part of the pipeline contract.
-Each `Results` folder must contain `*_results.xlsx` directly.
+To ingest old nested results, set `SIGNAL_EXTRACTION_LAYOUT=nested`, which uses
+`Data-BIDS/derivatives/signal_extraction/$DWI_LEVEL/$ROI_VARIANT`. The older
+`Results/<subject>` layout is not part of the current pipeline contract. Each
+`Results` folder must contain `*_results.xlsx` directly.
 
 ### Sequence Parameters
 
@@ -256,15 +260,15 @@ Default output roots:
 
 | Dataset | Sequence | Default `ANALYSIS_ROOT` |
 |---|---|---|
-| `brain` | `ogse` | `analysis/brains/ogse_experiments` |
-| `brain` | `nogse` | `analysis/brains/nogse_experiments` |
-| `phantom` | `ogse` | `analysis/phantoms/ogse_experiments` |
-| `phantom` | `nogse` | `analysis/phantoms/nogse_experiments` |
+| `brain` | `ogse` | `analysis/<SIGNAL_EXTRACTION_TAG>--brains/ogse_experiments` |
+| `brain` | `nogse` | `analysis/<SIGNAL_EXTRACTION_TAG>--brains/nogse_experiments` |
+| `phantom` | `ogse` | `analysis/<SIGNAL_EXTRACTION_TAG>--phantoms/ogse_experiments` |
+| `phantom` | `nogse` | `analysis/<SIGNAL_EXTRACTION_TAG>--phantoms/nogse_experiments` |
 
 Typical output layout:
 
 ```text
-analysis/brains/ogse_experiments/
+analysis/den_gr-topup--plain--brains/ogse_experiments/
 ├── master.long.parquet
 ├── master.last_points.long.parquet
 ├── master.xlsx
@@ -473,11 +477,11 @@ Brain OGSE:
 ```bash
 nohup bash signal_analysis/run_dataset.sh brain ogse ingest > logs/01_ingest.log 2>&1 &
 MASTER_LAST_POINTS_BY_TD="120:8=6,120:4=4,210=8" nohup bash signal_analysis/run_dataset.sh brain ogse filter_master_points > logs/00_filter.log 2>&1 &
-MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse rotate > logs/02_rotate.log 2>&1 &
-MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse plot_signal > logs/03_plot_signal.log 2>&1 &
-MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse grad_correction > logs/05_grad_correction.log 2>&1 &
-MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d > logs/06b_plot_monoexp_d.log 2>&1 &
-MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/06_alpha.log 2>&1 &
+MASTER_PARQUET=analysis/den_gr-topup--plain--brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse rotate > logs/02_rotate.log 2>&1 &
+MASTER_PARQUET=analysis/den_gr-topup--plain--brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse plot_signal > logs/03_plot_signal.log 2>&1 &
+MASTER_PARQUET=analysis/den_gr-topup--plain--brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse grad_correction > logs/05_grad_correction.log 2>&1 &
+MASTER_PARQUET=analysis/den_gr-topup--plain--brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d > logs/06b_plot_monoexp_d.log 2>&1 &
+MASTER_PARQUET=analysis/den_gr-topup--plain--brains/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/06_alpha.log 2>&1 &
 ```
 
 Brain OGSE all-in-one filtered core chain:
@@ -492,11 +496,11 @@ Phantom OGSE:
 ```bash
 nohup bash signal_analysis/run_dataset.sh phantom ogse ingest > logs/01_ingest.log 2>&1 &
 MASTER_LAST_POINTS_BY_TD="120:8=6,120:4=4,210=8" nohup bash signal_analysis/run_dataset.sh phantom ogse filter_master_points > logs/00_filter.log 2>&1 &
-MASTER_PARQUET=analysis/phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse rotate > logs/02_rotate.log 2>&1 &
-MASTER_PARQUET=analysis/phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse plot_signal > logs/03_plot_signal.log 2>&1 &
-MASTER_PARQUET=analysis/phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse grad_correction > logs/05_grad_correction.log 2>&1 &
-MASTER_PARQUET=analysis/phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse plot_monoexp_d > logs/06b_plot_monoexp_d.log 2>&1 &
-MASTER_PARQUET=analysis/phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse alpha > logs/06_alpha.log 2>&1 &
+MASTER_PARQUET=analysis/raw--manual--phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse rotate > logs/02_rotate.log 2>&1 &
+MASTER_PARQUET=analysis/raw--manual--phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse plot_signal > logs/03_plot_signal.log 2>&1 &
+MASTER_PARQUET=analysis/raw--manual--phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse grad_correction > logs/05_grad_correction.log 2>&1 &
+MASTER_PARQUET=analysis/raw--manual--phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse plot_monoexp_d > logs/06b_plot_monoexp_d.log 2>&1 &
+MASTER_PARQUET=analysis/raw--manual--phantoms/ogse_experiments/master.last_points.long.parquet nohup bash signal_analysis/run_dataset.sh phantom ogse alpha > logs/06_alpha.log 2>&1 &
 ```
 
 Phantom OGSE all-in-one filtered core chain:
@@ -725,7 +729,7 @@ Examples:
 ```bash
 nohup bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d > logs/plot_monoexp_d.log 2>&1 &
 
-SIGNAL_FITS_ROOT=analysis/brains/ogse_experiments/fits/signal_fit_monoexp_value_norm_vs_bvalue_g \
+SIGNAL_FITS_ROOT=analysis/den_gr-topup--plain--brains/ogse_experiments/fits/signal_fit_monoexp_value_norm_vs_bvalue_g \
   nohup bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d > logs/plot_monoexp_d.log 2>&1 &
 ```
 
@@ -886,10 +890,10 @@ outside this repository, for example `TC_METHOD=pseudohuber_fixed_macro`.
 ## Export Master Table to Excel
 
 ```bash
-MASTER_PARQUET=analysis/brains/ogse_experiments/master.long.parquet MASTER_XLSX=analysis/brains/ogse_experiments/master.xlsx \
+MASTER_PARQUET=analysis/den_gr-topup--plain--brains/ogse_experiments/master.long.parquet MASTER_XLSX=analysis/den_gr-topup--plain--brains/ogse_experiments/master.xlsx \
   nohup bash signal_analysis/run_dataset.sh brain ogse export_master_xlsx > logs/export_master_xlsx.log 2>&1 &
 
-MASTER_PARQUET=analysis/phantoms/ogse_experiments/master.long.parquet MASTER_XLSX=analysis/phantoms/ogse_experiments/master.xlsx \
+MASTER_PARQUET=analysis/raw--manual--phantoms/ogse_experiments/master.long.parquet MASTER_XLSX=analysis/raw--manual--phantoms/ogse_experiments/master.xlsx \
   nohup bash signal_analysis/run_dataset.sh phantom ogse export_master_xlsx > logs/export_master_xlsx.log 2>&1 &
 ```
 
@@ -902,12 +906,15 @@ any command:
 |---|---|
 | `PY` | Python interpreter |
 | `SIGNALS_ROOT` | Root containing sequence-parameter Excel files; default `$PROJECT_ROOT/Data-BIDS` |
-| `DWI_LEVEL` | `signal_extraction` DWI level used by `ingest`; default `den_gr-topup` |
-| `ROI_VARIANT` | `signal_extraction` ROI variant used by `ingest`; default `plain` |
+| `DWI_LEVEL` | `signal_extraction` DWI level used by `ingest`; defaults: brains `den_gr-topup`, phantoms `raw` |
+| `ROI_VARIANT` | segmentation/ROI namespace for brains, manual-mask namespace for phantoms; defaults: brains `plain`, phantoms `manual` |
+| `SIGNAL_EXTRACTION_TAG` | flat folder under `Data-BIDS/derivatives/signal_extraction`; default `$DWI_LEVEL--$ROI_VARIANT` |
+| `SIGNAL_EXTRACTION_LAYOUT` | `flat` by default; set `nested` to read legacy `$DWI_LEVEL/$ROI_VARIANT` results |
 | `RESULTS_ROOT` / `--results-root` repeatable | Results folder or folders to ingest |
 | `PARAMS_XLSX` | Sequence-parameter Excel file; required for phantom `ingest` |
 | `NOGSE_ONEG` | Set to `1` during NOGSE direct-g `ingest` when each results file is one gradient point |
-| `ANALYSIS_ROOT` | Analysis output root; default `$PROJECT_ROOT/analysis/<brains\|phantoms>/<experiment>` |
+| `ANALYSIS_TAG` | analysis namespace; default `$SIGNAL_EXTRACTION_TAG--<brains\|phantoms>` |
+| `ANALYSIS_ROOT` | Analysis output root; default `$PROJECT_ROOT/analysis/$ANALYSIS_TAG/<experiment>` |
 | `MASTER_PARQUET` | Master parquet to use or generate |
 | `MANIFEST_DIR` | Manifest folder for the current dataset |
 | `MASTER_LAST_POINTS_BY_TD` | Optional td/N last-points filtering rules |

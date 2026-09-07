@@ -52,25 +52,41 @@ pipeline_set_dataset_defaults() {
     TYPE_SEQ="$type_seq"
     EXPERIMENT_ROOT_NAME="${type_seq}_experiments"
     SIGNALS_ROOT="${SIGNALS_ROOT:-$PROJECT_ROOT/Data-BIDS}"
-    DWI_LEVEL="${DWI_LEVEL:-den_gr-topup}"
-    ROI_VARIANT="${ROI_VARIANT:-plain}"
-    RESULTS_ROOT="${RESULTS_ROOT:-$PROJECT_ROOT/Data-BIDS/derivatives/signal_extraction/$DWI_LEVEL/$ROI_VARIANT}"
-
     case "$dataset" in
         brains)
+            DWI_LEVEL="${DWI_LEVEL:-den_gr-topup}"
+            ROI_VARIANT="${ROI_VARIANT:-plain}"
             PARAMS_XLSX="${PARAMS_XLSX:-$SIGNALS_ROOT/sequence_parameters_brains.xlsx}"
-            ANALYSIS_ROOT="${ANALYSIS_ROOT:-$PROJECT_ROOT/analysis/brains/$EXPERIMENT_ROOT_NAME}"
             ;;
         phantoms)
+            DWI_LEVEL="${DWI_LEVEL:-raw}"
+            ROI_VARIANT="${ROI_VARIANT:-manual}"
             PARAMS_XLSX="${PARAMS_XLSX:-$SIGNALS_ROOT/sequence_parameters_phantoms.xlsx}"
-            ANALYSIS_ROOT="${ANALYSIS_ROOT:-$PROJECT_ROOT/analysis/phantoms/$EXPERIMENT_ROOT_NAME}"
             ;;
     esac
+    SIGNAL_EXTRACTION_TAG="${SIGNAL_EXTRACTION_TAG:-${DWI_LEVEL}--${ROI_VARIANT}}"
+    SIGNAL_EXTRACTION_LAYOUT="${SIGNAL_EXTRACTION_LAYOUT:-flat}"
+    case "$SIGNAL_EXTRACTION_LAYOUT" in
+        flat)
+            RESULTS_ROOT="${RESULTS_ROOT:-$PROJECT_ROOT/Data-BIDS/derivatives/signal_extraction/$SIGNAL_EXTRACTION_TAG}"
+            ;;
+        nested|legacy)
+            RESULTS_ROOT="${RESULTS_ROOT:-$PROJECT_ROOT/Data-BIDS/derivatives/signal_extraction/$DWI_LEVEL/$ROI_VARIANT}"
+            ;;
+        *)
+            echo "ERROR: SIGNAL_EXTRACTION_LAYOUT must be flat or nested, got: $SIGNAL_EXTRACTION_LAYOUT" >&2
+            exit 2
+            ;;
+    esac
+
+    ANALYSIS_TAG="${ANALYSIS_TAG:-${SIGNAL_EXTRACTION_TAG}--${dataset}}"
+    ANALYSIS_ROOT="${ANALYSIS_ROOT:-$PROJECT_ROOT/analysis/$ANALYSIS_TAG/$EXPERIMENT_ROOT_NAME}"
 
     MASTER_PARQUET="${MASTER_PARQUET:-$ANALYSIS_ROOT/master.long.parquet}"
     MANIFEST_DIR="${MANIFEST_DIR:-$TEMPLATE_ROOT/manifests/${dataset}_${type_seq}}"
 
     export DATASET TYPE_SUBJ TYPE_SEQ EXPERIMENT_ROOT_NAME DWI_LEVEL ROI_VARIANT
+    export SIGNAL_EXTRACTION_TAG SIGNAL_EXTRACTION_LAYOUT ANALYSIS_TAG
 }
 
 pipeline_require_file() {
@@ -190,10 +206,20 @@ Help for one step:
 Common environment variables:
   PY                 Python interpreter.
   SIGNALS_ROOT       Root containing sequence parameter workbooks. Default: Data-BIDS.
-  DWI_LEVEL          signal_extraction DWI level. Default: den_gr-topup.
-  ROI_VARIANT        signal_extraction ROI variant. Default: plain.
+  DWI_LEVEL          signal_extraction DWI level.
+                     Defaults: brains=den_gr-topup, phantoms=raw.
+  ROI_VARIANT        segmentation/ROI namespace for brains, mask namespace for phantoms.
+                     Defaults: brains=plain, phantoms=manual.
+  SIGNAL_EXTRACTION_TAG
+                     Flat signal_extraction output tag.
+                     Default: $DWI_LEVEL--$ROI_VARIANT.
+  SIGNAL_EXTRACTION_LAYOUT
+                     flat (default) reads signal_extraction/$SIGNAL_EXTRACTION_TAG.
+                     nested reads legacy signal_extraction/$DWI_LEVEL/$ROI_VARIANT.
+  ANALYSIS_TAG       Default: $SIGNAL_EXTRACTION_TAG--<brains|phantoms>.
   PARAMS_XLSX        Sequence-parameter workbook.
   ANALYSIS_ROOT      Output analysis root.
+                     Default: analysis/$ANALYSIS_TAG/<ogse|nogse>_experiments.
   MASTER_PARQUET     Master table path.
   MANIFEST_DIR       Directory with contrasts.csv, signal_fits.csv, and grad_correction.csv.
   MASTER_LAST_POINTS_BY_TD
@@ -213,13 +239,13 @@ Master table format:
   appends to parquet. To inspect it in Excel, export a copy explicitly:
 
     python signal_analysis/scripts/data/export_master_table.py \
-      analysis/brains/ogse_experiments/master.long.parquet \
-      --out-xlsx analysis/brains/ogse_experiments/master.inspect.xlsx
+      analysis/den_gr-topup--plain--brains/ogse_experiments/master.long.parquet \
+      --out-xlsx analysis/den_gr-topup--plain--brains/ogse_experiments/master.inspect.xlsx
 
 Examples:
   # Ingest one signal_extraction Results folder.
   bash signal_analysis/run_dataset.sh brain ogse \
-    --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results \
+    --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup--sket1/sub-MBBL-3/ses-T0/Results \
     ingest
 
   # Or ingest all Results folders under one DWI/ROI namespace.
@@ -267,10 +293,17 @@ Runner arguments:
 
 Variables for this step:
   RESULTS_ROOT        One Results folder/root if RESULTS_ROOTS is unset.
-                      Default: Data-BIDS/derivatives/signal_extraction/$DWI_LEVEL/$ROI_VARIANT
+                      Default: Data-BIDS/derivatives/signal_extraction/$SIGNAL_EXTRACTION_TAG
   RESULTS_ROOTS       Space-separated Results roots.
-  DWI_LEVEL           signal_extraction DWI level. Default: den_gr-topup.
-  ROI_VARIANT         signal_extraction ROI variant. Default: plain.
+  DWI_LEVEL           signal_extraction DWI level.
+                      Defaults: brains=den_gr-topup, phantoms=raw.
+  ROI_VARIANT         segmentation/ROI namespace for brains, mask namespace for phantoms.
+                      Defaults: brains=plain, phantoms=manual.
+  SIGNAL_EXTRACTION_TAG
+                      Flat signal_extraction output tag. Default: $DWI_LEVEL--$ROI_VARIANT.
+  SIGNAL_EXTRACTION_LAYOUT
+                      flat (default) or nested for legacy $DWI_LEVEL/$ROI_VARIANT paths.
+  ANALYSIS_TAG        Default: $SIGNAL_EXTRACTION_TAG--<brains|phantoms>.
   PARAMS_XLSX         Sequence-parameter workbook.
   RESULTS_GLOB        Results filename pattern. Default: *_results.xlsx
   MASTER_PARQUET      Master table output.
@@ -279,13 +312,16 @@ Variables for this step:
 
 Examples:
   bash signal_analysis/run_dataset.sh brain ogse \
-    --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results \
+    --results-root Data-BIDS/derivatives/signal_extraction/den_gr-topup--sket1/sub-MBBL-3/ses-T0/Results \
     ingest
 
-  RESULTS_ROOTS="Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-MBBL-3/ses-T0/Results Data-BIDS/derivatives/signal_extraction/den_gr-topup/sket1/sub-LUDG-3/ses-T0/Results" \
+  RESULTS_ROOTS="Data-BIDS/derivatives/signal_extraction/den_gr-topup--sket1/sub-MBBL-3/ses-T0/Results Data-BIDS/derivatives/signal_extraction/den_gr-topup--sket1/sub-LUDG-3/ses-T0/Results" \
     bash signal_analysis/run_dataset.sh brain ogse ingest
 
   DWI_LEVEL=den_gr-topup ROI_VARIANT=sket1 \
+    bash signal_analysis/run_dataset.sh brain ogse ingest
+
+  SIGNAL_EXTRACTION_LAYOUT=nested DWI_LEVEL=den_gr-topup ROI_VARIANT=sket1 \
     bash signal_analysis/run_dataset.sh brain ogse ingest
 
   PARAMS_XLSX=Data-BIDS/sequence_parameters_brains.xlsx \
@@ -330,7 +366,7 @@ Examples:
   MASTER_LAST_POINTS_BY_TD="120=6,90=ALL" \
     bash signal_analysis/run_dataset.sh brain ogse filter_master_points
 
-  MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet \
+  MASTER_PARQUET=$ANALYSIS_ROOT/master.last_points.long.parquet \
     bash signal_analysis/run_dataset.sh brain ogse rotate contrast fit_signal
 EOF
             ;;
@@ -353,8 +389,8 @@ Variables for this step:
 Examples:
   bash signal_analysis/run_dataset.sh brain ogse export_master_xlsx
 
-  MASTER_PARQUET=analysis/brains/ogse_experiments/master.last_points.long.parquet \
-  MASTER_XLSX=analysis/brains/ogse_experiments/master.last_points.xlsx \
+  MASTER_PARQUET=$ANALYSIS_ROOT/master.last_points.long.parquet \
+  MASTER_XLSX=$ANALYSIS_ROOT/master.last_points.xlsx \
     bash signal_analysis/run_dataset.sh brain ogse export_master_xlsx
 EOF
             ;;
@@ -478,7 +514,7 @@ Variables for this step:
   EXPORT_RESAMPLED_EXTRA_ARGS Extra export_ogse_resampled_contrasts_from_fits.py options.
 
 Examples:
-  SIGNAL_FIT_OUT_ROOT=analysis/brains/ogse_experiments/fits/ogse_signal_ogse_mixed_offset \
+  SIGNAL_FIT_OUT_ROOT=$ANALYSIS_ROOT/fits/ogse_signal_ogse_mixed_offset \
     bash signal_analysis/run_dataset.sh brain ogse contrast_resampled
 EOF
             ;;
@@ -887,7 +923,7 @@ Examples:
 
   # run without grad correction
   GLOBAL_SIGNAL_APPLY_GRAD_CORR=false \
-  GLOBAL_SIGNAL_OUT_ROOT="analysis/brains/ogse_experiments/fits/ogse_signal_ogse_mixed_offset_raw" \
+  GLOBAL_SIGNAL_OUT_ROOT="$ANALYSIS_ROOT/fits/ogse_signal_ogse_mixed_offset_raw" \
     bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 
   # use a custom manifest (e.g. only N=8/N=4 pairs at td=90 for specific ROIs)
@@ -916,12 +952,12 @@ Variables for this step:
   SIGNAL_FITS_ROOT          Root scanned for signal fit parquets.
                             Default: $ANALYSIS_ROOT/fits (scans all subdirs).
                             Set explicitly to the specific fit folder, e.g.:
-                            $ANALYSIS_ROOT/fits/master/ogse_value_norm_vs_bvaluethorsten_monoexp
+                            $ANALYSIS_ROOT/fits/signal_fit_monoexp_value_norm_vs_bvalue_g
   MONOEXP_D_OUT_DIR         Output plot/table directory. Default: $ANALYSIS_ROOT/plots-master/monoexp_D_vs_time
   PLOT_MONOEXP_D_EXTRA_ARGS Extra plot_monoexp_D_vs_time.py options.
 
 Examples:
-  SIGNAL_FITS_ROOT=analysis/brains/ogse_experiments/fits/master/ogse_value_norm_vs_bvaluethorsten_monoexp \
+  SIGNAL_FITS_ROOT=$ANALYSIS_ROOT/fits/signal_fit_monoexp_value_norm_vs_bvalue_g \
     bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d
 EOF
             ;;
@@ -1089,14 +1125,14 @@ Examples:
   # pseudohuber with fixed alpha_macro from summary
   TC_FIT_PARAMS="fits/master/ogse_.../fit_params.*.parquet" \
   TC_METHOD=pseudohuber_fixed_macro \
-  TC_EXTRA_ARGS="--summary-alpha analysis/brains/ogse_experiments/alpha_macro/master/summary_alpha_values.xlsx" \
+  TC_EXTRA_ARGS="--summary-alpha $ANALYSIS_ROOT/alpha_macro/master/summary_alpha_values.xlsx" \
     bash signal_analysis/run_dataset.sh brain ogse tc
 
   # linear fit on resampled tc_peak
   TC_FIT_PARAMS="fits/master/ogse_.../fit_params.*.parquet" \
   TC_METHOD=linear \
   TC_Y_COL=tc_peak_resampled_ms \
-  TC_OUT_DIR="analysis/brains/ogse_experiments/fits/tc_vs_td_resampled_master" \
+  TC_OUT_DIR="$ANALYSIS_ROOT/fits/tc_vs_td_resampled_master" \
     bash signal_analysis/run_dataset.sh brain ogse tc
 EOF
             ;;
