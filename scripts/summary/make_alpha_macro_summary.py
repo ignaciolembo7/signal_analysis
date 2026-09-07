@@ -44,7 +44,7 @@ def _canonical_roi_name(value: str) -> str:
     return str(value).strip().replace("_norm", "").lower()
 
 
-def _parse_roi_bvalmax(items: list[str] | None) -> dict[str, int]:
+def _parse_roi_bvalmax(items: list[str] | None) -> dict[str, float]:
     if not items:
         return {}
     out: dict[str, int] = {}
@@ -52,7 +52,7 @@ def _parse_roi_bvalmax(items: list[str] | None) -> dict[str, int]:
         token = str(raw).strip()
         if "=" not in token:
             raise ValueError(
-                f"Invalid --roi-bvalmax value {raw!r}. Use ROI=BSTEP format, for example AntCC=7."
+                f"Invalid --roi-bvalmax value {raw!r}. Use ROI=BSTEP_OR_BVALUE format, for example AntCC=7 or AntCC=1280."
             )
         roi, bstep = token.split("=", 1)
         roi = roi.strip()
@@ -60,14 +60,14 @@ def _parse_roi_bvalmax(items: list[str] | None) -> dict[str, int]:
         if not roi:
             raise ValueError(f"Invalid ROI in --roi-bvalmax {raw!r}.")
         try:
-            value = int(bstep)
+            value = float(bstep)
         except ValueError as exc:
             raise ValueError(
-                f"Invalid BSTEP in --roi-bvalmax {raw!r}. It must be an integer >= 1."
+                f"Invalid BSTEP/BVALUE in --roi-bvalmax {raw!r}. It must be a number >= 1."
             ) from exc
         if value < 1:
             raise ValueError(
-                f"Invalid BSTEP in --roi-bvalmax {raw!r}. It must be an integer >= 1."
+                f"Invalid BSTEP/BVALUE in --roi-bvalmax {raw!r}. It must be a number >= 1."
             )
         out[roi] = value
     return out
@@ -240,12 +240,34 @@ def main() -> None:
     ap.add_argument("--bvalue-decimals", type=int, default=1, help="Decimals used to round bvalue before grouping.")
     ap.add_argument(
         "--bvalmax",
+        type=float,
+        default=None,
+        help=(
+            "Bstep or bvalue to use for alpha_macro. "
+            "If the value is within the available candidate bstep range it is treated as a 1-based bstep; "
+            "otherwise it is matched as a rounded bvalue. Example: --bvalmax 7 or --bvalmax 2000."
+        ),
+    )
+    ap.add_argument(
+        "--plot-bsteps",
+        "--plot_bsteps",
+        nargs="+",
         type=int,
         default=None,
         help=(
-            "Bstep (1-based) to use for alpha_macro. "
-            "Example: --bvalmax 7 uses the seventh bvalue after ascending sort. "
-            "When omitted, the highest bvalue is used."
+            "Candidate 1-based bvalue positions used both for alpha selection and, "
+            "when passed to plot_D0_vs_Delta.py, for choosing curves to draw."
+        ),
+    )
+    ap.add_argument(
+        "--plot-bvalues",
+        "--plot_bvalues",
+        nargs="+",
+        type=float,
+        default=None,
+        help=(
+            "Candidate rounded bvalues used both for alpha selection and, "
+            "when passed to plot_D0_vs_Delta.py, for choosing curves to draw."
         ),
     )
     ap.add_argument(
@@ -253,8 +275,8 @@ def main() -> None:
         action="append",
         default=None,
         help=(
-            "Per-ROI bstep override, repeatable, format ROI=BSTEP. "
-            "Example: --roi-bvalmax AntCC=7 --roi-bvalmax MidAntCC=6. "
+            "Per-ROI bstep/bvalue override, repeatable, format ROI=X. "
+            "Example: --roi-bvalmax AntCC=7 --roi-bvalmax MidAntCC=1280. "
             "If an ROI is not listed, the global --bvalmax is used, or the highest bvalue."
         ),
     )
@@ -288,7 +310,7 @@ def main() -> None:
             if key and key not in roi_canon_to_actual:
                 roi_canon_to_actual[key] = roi_name
 
-        roi_bvalmax_resolved: dict[str, int] = {}
+        roi_bvalmax_resolved: dict[str, float] = {}
         roi_desconocidos: list[str] = []
         for roi_name, bstep in roi_bvalmax.items():
             key = _canonical_roi_name(roi_name)
@@ -311,6 +333,8 @@ def main() -> None:
         reference_D0_error=float(args.reference_D0_error),
         selected_bstep=args.bvalmax,
         roi_selected_bsteps=roi_bvalmax or None,
+        candidate_bsteps=args.plot_bsteps,
+        candidate_bvalues=args.plot_bvalues,
         direction_aliases=aliases,
     )
 

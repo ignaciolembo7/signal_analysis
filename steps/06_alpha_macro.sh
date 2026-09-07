@@ -15,12 +15,17 @@ pipeline_require_file "$ALPHA_MACRO_SCRIPT" "alpha macro script"
 pipeline_require_file "$MASTER_PARQUET" "master table"
 mkdir -p "$ALPHA_OUT_DIR"
 
+alpha_plot_args=()
+[[ -n "${ALPHA_PLOT_BSTEPS:-}" ]]  && alpha_plot_args+=(--plot-bsteps ${ALPHA_PLOT_BSTEPS})
+[[ -n "${ALPHA_PLOT_BVALUES:-}" ]] && alpha_plot_args+=(--plot-bvalues ${ALPHA_PLOT_BVALUES})
+
 "$PY" "$ALPHA_MACRO_SCRIPT" \
     --master-parquet "$MASTER_PARQUET" \
     --no-master-fit-params \
     --N "${ALPHA_N:-1}" \
     --out-summary "$SUMMARY_ALPHA" \
     --out-avg "$ALPHA_OUT_DIR/D_vs_delta_app.combined.xlsx" \
+    "${alpha_plot_args[@]}" \
     ${ALPHA_EXTRA_ARGS:-}
 
 # Generate D vs Delta_app plots with alpha annotation per ROI.
@@ -36,5 +41,7 @@ if [[ -f "$PLOT_D0_SCRIPT" ]]; then
     [[ -n "${DPROJ_HZ:-}" ]]   && plot_args+=(--Hz "$DPROJ_HZ")
     [[ -n "${DPROJ_ROIS:-}" ]] && plot_args+=(--rois ${DPROJ_ROIS})
     [[ -n "${DPROJ_DIRS:-}" ]] && plot_args+=(--dirs ${DPROJ_DIRS})
+    [[ -n "${ALPHA_PLOT_BSTEPS:-}" ]]  && plot_args+=(--plot-bsteps ${ALPHA_PLOT_BSTEPS})
+    [[ -n "${ALPHA_PLOT_BVALUES:-}" ]] && plot_args+=(--plot-bvalues ${ALPHA_PLOT_BVALUES})
     "$PY" "$PLOT_D0_SCRIPT" "${plot_args[@]}" ${PLOT_D0_EXTRA_ARGS:-}
 fi

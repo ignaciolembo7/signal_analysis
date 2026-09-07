@@ -12,6 +12,7 @@ from data_processing.io import write_xlsx_csv_outputs
 from monoexp_fitting.plot_D0_vs_Delta import (
     load_all_measurements,
     load_selected_bstep_map,
+    load_selected_bvalue_map,
     plot_all_groups,
 )
 from tc_fittings.alpha_macro_summary import load_dproj_measurements_from_table
@@ -110,11 +111,33 @@ def main() -> None:
     ap.add_argument("--bvalue-decimals", type=int, default=1, help="Decimals used to round bvalue before grouping.")
     ap.add_argument(
         "--bvalmax",
+        type=float,
+        default=None,
+        help=(
+            "Bstep or bvalue fallback for the horizontal line and plot alpha. "
+            "If omitted, the highest bvalue is used."
+        ),
+    )
+    ap.add_argument(
+        "--plot-bsteps",
+        "--plot_bsteps",
+        nargs="+",
         type=int,
         default=None,
         help=(
-            "Bstep (1-based) to use for the horizontal line and plot alpha. "
-            "If omitted, the highest bvalue is used."
+            "Only draw these 1-based b-value positions in each D-vs-Delta plot, "
+            "after sorting b-values ascending. Example: --plot-bsteps 1 3 5."
+        ),
+    )
+    ap.add_argument(
+        "--plot-bvalues",
+        "--plot_bvalues",
+        nargs="+",
+        type=float,
+        default=None,
+        help=(
+            "Only draw these exact rounded b-values in each D-vs-Delta plot. "
+            "Values are compared after --bvalue-decimals rounding. Example: --plot-bvalues 300 600."
         ),
     )
     ap.add_argument("--reference-D0", type=float, default=0.0032, help="Reference value used to annotate alpha in the plot.")
@@ -165,8 +188,10 @@ def main() -> None:
     summary_alpha_path = Path(args.summary_alpha) if args.summary_alpha is not None else (default_summary if default_summary.exists() else None)
 
     selected_bstep_by_group = None
+    selected_bvalue_by_group = None
     if summary_alpha_path is not None:
         selected_bstep_by_group = load_selected_bstep_map(summary_alpha_path)
+        selected_bvalue_by_group = load_selected_bvalue_map(summary_alpha_path)
         if args.dirs is None:
             summary_groups = _read_summary_alpha_groups(summary_alpha_path)
             before = len(df)
@@ -181,6 +206,10 @@ def main() -> None:
             f"[INFO] Loaded selected_bstep map from {summary_alpha_path} "
             f"({len(selected_bstep_by_group)} group entries)."
         )
+        print(
+            f"[INFO] Loaded selected_bvalue map from {summary_alpha_path} "
+            f"({len(selected_bvalue_by_group)} group entries)."
+        )
         if args.bvalmax is not None:
             print(
                 "[INFO] --bvalmax is used only as fallback for groups missing in summary_alpha."
@@ -192,6 +221,9 @@ def main() -> None:
         out_dir=out_dir,
         selected_bstep=args.bvalmax,
         selected_bstep_by_group=selected_bstep_by_group,
+        selected_bvalue_by_group=selected_bvalue_by_group,
+        plot_bsteps=args.plot_bsteps,
+        plot_bvalues=args.plot_bvalues,
         reference_D0=float(args.reference_D0),
         reference_D0_error=float(args.reference_D0_error),
     )

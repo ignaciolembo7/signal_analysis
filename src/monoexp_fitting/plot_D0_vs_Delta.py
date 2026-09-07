@@ -88,6 +88,58 @@ def load_selected_bstep_map(summary_alpha: str | Path) -> dict[tuple[str, str, s
     return mapping
 
 
+def load_selected_bvalue_map(summary_alpha: str | Path) -> dict[tuple[str, str, str], float]:
+    path = Path(summary_alpha)
+    if not path.exists():
+        raise FileNotFoundError(path)
+
+    df = _read_table(path)
+    subj_col = _pick_column(df, ["subj", "brain"])
+    roi_col = _pick_column(df, ["roi", "region"])
+    direction_col = _pick_column(df, ["direction", "direccion"])
+    bvalue_col = _pick_column(df, ["selected_bvalue"])
+    if subj_col is None or roi_col is None or direction_col is None:
+        raise KeyError(
+            f"summary_alpha missing key columns in {path}. Expected subj/roi/direction aliases, got {list(df.columns)}"
+        )
+    if bvalue_col is None:
+        return {}
+
+    extra_cols = [c for c in ["direction_kind", "direction_components"] if c in df.columns]
+    out = df[[subj_col, roi_col, direction_col, bvalue_col] + extra_cols].copy()
+    out[subj_col] = out[subj_col].astype(str).str.strip()
+    out[roi_col] = out[roi_col].astype(str).str.strip()
+    out[direction_col] = out[direction_col].astype(str).str.strip()
+    out[bvalue_col] = pd.to_numeric(out[bvalue_col], errors="coerce")
+    out = out.dropna(subset=[bvalue_col])
+    if out.empty:
+        return {}
+
+    if "direction_kind" in out.columns:
+        out["_pref"] = out["direction_kind"].astype(str).str.lower().map(lambda v: 0 if v == "derived" else 1)
+    else:
+        out["_pref"] = 0
+
+    out = out.sort_values([subj_col, roi_col, direction_col, "_pref"], kind="stable")
+    out = out.drop_duplicates(subset=[subj_col, roi_col, direction_col], keep="first")
+
+    mapping: dict[tuple[str, str, str], float] = {}
+    for _, row in out.iterrows():
+        subj = str(row[subj_col])
+        roi = str(row[roi_col])
+        direction = str(row[direction_col])
+        bvalue = float(row[bvalue_col])
+        mapping[(subj, roi, direction)] = bvalue
+        mapping[(subj, _norm_roi(roi), direction)] = bvalue
+        if "direction_components" in out.columns:
+            for component in str(row.get("direction_components", "")).split("|"):
+                component = component.strip()
+                if component:
+                    mapping[(subj, roi, component)] = bvalue
+                    mapping[(subj, _norm_roi(roi), component)] = bvalue
+    return mapping
+
+
 def load_all_measurements(
     dproj_root: str | Path,
     *,
@@ -115,8 +167,11 @@ def plot_all_groups(
     df_avg: pd.DataFrame,
     *,
     out_dir: str | Path,
-    selected_bstep: int | None = None,
+    selected_bstep: float | None = None,
     selected_bstep_by_group: Mapping[tuple[str, str, str], int] | None = None,
+    selected_bvalue_by_group: Mapping[tuple[str, str, str], float] | None = None,
+    plot_bsteps: Sequence[int] | None = None,
+    plot_bvalues: Sequence[float] | None = None,
     reference_D0: float | None = None,
     reference_D0_error: float | None = None,
 ) -> list[Path]:
@@ -125,6 +180,9 @@ def plot_all_groups(
         out_dir=out_dir,
         selected_bstep=selected_bstep,
         selected_bstep_by_group=selected_bstep_by_group,
+        selected_bvalue_by_group=selected_bvalue_by_group,
+        plot_bsteps=plot_bsteps,
+        plot_bvalues=plot_bvalues,
         reference_D0=reference_D0,
         reference_D0_error=reference_D0_error,
     )

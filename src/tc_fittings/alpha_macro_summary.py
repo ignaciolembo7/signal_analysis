@@ -40,24 +40,58 @@ def _merge_pipe_lists(values: Iterable[object]) -> str:
 def _select_bvalue_and_bstep(
     bvalues: Sequence[float],
     *,
-    selected_bstep: int | None,
+    selected_bstep: float | None,
+    candidate_bsteps: Sequence[int] | None = None,
+    candidate_bvalues: Sequence[float] | None = None,
     group_label: str,
 ) -> tuple[float, int]:
     if len(bvalues) == 0:
         raise ValueError(f"No bvalues available for {group_label}.")
-    if selected_bstep is not None and selected_bstep < 1:
-        raise ValueError("selected_bstep must be >= 1.")
 
     ordered = np.sort(np.asarray(bvalues, dtype=float))
-    if selected_bstep is None:
-        return float(ordered[-1]), int(len(ordered))
-    if selected_bstep > len(ordered):
-        raise ValueError(
-            "selected_bstep="
-            f"{selected_bstep} is out of range for {group_label}. "
-            f"Only {len(ordered)} bsteps are available: {list(map(float, ordered))}"
+    candidates = ordered.copy()
+    if candidate_bsteps:
+        bstep_set = {int(v) for v in candidate_bsteps}
+        if any(v < 1 for v in bstep_set):
+            raise ValueError("candidate bsteps must be >= 1.")
+        candidates = np.asarray([value for idx, value in enumerate(ordered, start=1) if idx in bstep_set], dtype=float)
+    if candidate_bvalues:
+        wanted = np.asarray(list(candidate_bvalues), dtype=float)
+        wanted = wanted[np.isfinite(wanted)]
+        candidates = np.asarray(
+            [value for value in candidates if np.any(np.isclose(float(value), wanted, rtol=0.0, atol=1e-6))],
+            dtype=float,
         )
-    return float(ordered[selected_bstep - 1]), int(selected_bstep)
+    if len(candidates) == 0:
+        raise ValueError(f"No candidate bvalues available for {group_label}.")
+
+    if selected_bstep is None:
+        selected_bvalue = float(candidates[-1])
+    else:
+        selected_value = float(selected_bstep)
+        if selected_value < 1:
+            raise ValueError("selected_bstep/selected_bvalue must be >= 1.")
+
+        selected_bvalue = np.nan
+        rounded = int(round(selected_value))
+        is_integer = np.isclose(selected_value, float(rounded), rtol=0.0, atol=1e-9)
+        if is_integer and 1 <= rounded <= len(candidates):
+            selected_bvalue = float(candidates[rounded - 1])
+        else:
+            matches = candidates[np.isclose(candidates, selected_value, rtol=0.0, atol=1e-6)]
+            if matches.size:
+                selected_bvalue = float(matches[0])
+
+        if not np.isfinite(selected_bvalue):
+            raise ValueError(
+                "selected_bstep/selected_bvalue="
+                f"{selected_bstep} is out of range for {group_label}. "
+                f"Candidate bvalues are: {list(map(float, candidates))}"
+            )
+
+    full_matches = np.where(np.isclose(ordered, selected_bvalue, rtol=0.0, atol=1e-6))[0]
+    full_bstep = int(full_matches[0] + 1) if full_matches.size else int(len(ordered))
+    return selected_bvalue, full_bstep
 
 
 def _read_table(path: Path) -> pd.DataFrame:
@@ -238,8 +272,11 @@ def plot_d_vs_delta_curves(
     df_avg: pd.DataFrame,
     *,
     out_dir: str | Path,
-    selected_bstep: int | None = None,
+    selected_bstep: float | None = None,
     selected_bstep_by_group: Mapping[tuple[str, str, str], int] | None = None,
+    selected_bvalue_by_group: Mapping[tuple[str, str, str], float] | None = None,
+    plot_bsteps: Sequence[int] | None = None,
+    plot_bvalues: Sequence[float] | None = None,
     reference_D0: float | None = None,
     reference_D0_error: float | None = None,
 ) -> list[Path]:
@@ -247,34 +284,60 @@ def plot_d_vs_delta_curves(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     outputs: list[Path] = []
+    plot_bstep_set = {int(v) for v in plot_bsteps or []}
+    if any(v < 1 for v in plot_bstep_set):
+        raise ValueError("plot_bsteps values must be >= 1.")
+    plot_bvalue_arr = np.asarray(list(plot_bvalues or []), dtype=float)
+    plot_bvalue_arr = plot_bvalue_arr[np.isfinite(plot_bvalue_arr)]
+
     for (subj, roi, direction), sub in df_avg.groupby(["subj", "roi", "direction"], sort=True):
         sub = sub.sort_values(["bvalue", "Delta_app_ms"], kind="stable")
         bvalues = sorted(sub["bvalue"].dropna().unique().tolist())
         if not bvalues:
+            continue
+        bvalues_to_plot = list(bvalues)
+        if plot_bstep_set:
+            bvalues_to_plot = [bvalue for idx, bvalue in enumerate(bvalues, start=1) if idx in plot_bstep_set]
+        if plot_bvalue_arr.size:
+            bvalues_to_plot = [
+                bvalue for bvalue in bvalues_to_plot
+                if np.any(np.isclose(float(bvalue), plot_bvalue_arr, rtol=0.0, atol=1e-6))
+            ]
+        if not bvalues_to_plot:
+            print(
+                f"[INFO] Skipping plot for subj={subj}, roi={roi}, direction={direction}: "
+                "no b-values matched the plot filter."
+            )
             continue
 
         fig, ax = plt.subplots(figsize=(8, 6))
         cmap = plt.get_cmap("viridis")
         group_key = (str(subj), str(roi), str(direction))
         group_selected_bstep = selected_bstep
+        group_selected_bvalue = None
+        roi_norm_key = (str(subj), str(roi).replace("_norm", "").lower(), str(direction))
+        if selected_bvalue_by_group is not None:
+            if group_key in selected_bvalue_by_group:
+                group_selected_bvalue = float(selected_bvalue_by_group[group_key])
+            elif roi_norm_key in selected_bvalue_by_group:
+                group_selected_bvalue = float(selected_bvalue_by_group[roi_norm_key])
         if selected_bstep_by_group is not None:
-            roi_norm_key = (str(subj), str(roi).replace("_norm", "").lower(), str(direction))
             if group_key in selected_bstep_by_group:
                 group_selected_bstep = int(selected_bstep_by_group[group_key])
             elif roi_norm_key in selected_bstep_by_group:
                 group_selected_bstep = int(selected_bstep_by_group[roi_norm_key])
         selected_bvalue, chosen_bstep = _select_bvalue_and_bstep(
             bvalues,
-            selected_bstep=group_selected_bstep,
+            selected_bstep=group_selected_bvalue if group_selected_bvalue is not None else group_selected_bstep,
             group_label=f"subj={subj}, roi={roi}, direction={direction}",
         )
         selected = sub[np.isclose(sub["bvalue"], selected_bvalue, atol=1e-9)].sort_values("Delta_app_ms")
 
-        for idx, bvalue in enumerate(bvalues):
+        for idx, bvalue in enumerate(bvalues_to_plot):
             curve = sub[np.isclose(sub["bvalue"], bvalue, atol=1e-9)].sort_values("Delta_app_ms")
             if curve.empty:
                 continue
-            color = cmap(idx / max(1, len(bvalues) - 1))
+            color = cmap(idx / max(1, len(bvalues_to_plot) - 1))
             ax.plot(
                 curve["Delta_app_ms"],
                 curve["D_mean_mm2_s"],
@@ -368,8 +431,10 @@ def compute_alpha_macro_summary(
     *,
     reference_D0: float = 0.0032,
     reference_D0_error: float = 0.0000283512,
-    selected_bstep: int | None = None,
-    roi_selected_bsteps: dict[str, int] | None = None,
+    selected_bstep: float | None = None,
+    roi_selected_bsteps: dict[str, float] | None = None,
+    candidate_bsteps: Sequence[int] | None = None,
+    candidate_bvalues: Sequence[float] | None = None,
     direction_aliases: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if reference_D0 <= 0:
@@ -388,6 +453,8 @@ def compute_alpha_macro_summary(
         selected_bvalue, chosen_bstep = _select_bvalue_and_bstep(
             bvalues,
             selected_bstep=roi_bstep if roi_bstep is not None else selected_bstep,
+            candidate_bsteps=candidate_bsteps,
+            candidate_bvalues=candidate_bvalues,
             group_label=f"subj={subj}, roi={roi}, direction={direction}",
         )
         chosen = sub[np.isclose(sub["bvalue"], selected_bvalue, atol=1e-9)].sort_values("Delta_app_ms")
