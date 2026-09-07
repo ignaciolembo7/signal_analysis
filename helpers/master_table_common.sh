@@ -527,35 +527,35 @@ Usage:
 
 What it does:
   Fits signal curves selected from master according to manifests/<type_subj>_<type_seq>/signal_fits.csv.
-  The model to use per row is set in the manifest's "model" column.
+  Currently this step supports only model=monoexp. Manifest rows may include a
+  "model" column, but non-monoexp values are rejected.
   fit_signal_gradcorr is a preset that adds --apply_grad_corr to every fit automatically.
 
 Variables for this step:
   MASTER_PARQUET          Input master table.
   FIT_SIGNAL_SCRIPT       Python script override.
   SIGNAL_FIT_MANIFEST     CSV signal-fit manifest.
-  SIGNAL_FIT_OUT_ROOT     Output root. Default: $ANALYSIS_ROOT/fits/<master_name>/<type_seq>_<ycol>_vs_<gtype>_<model>
-  SIGNAL_FIT_MODEL        Fallback model when the manifest "model" column is empty.
-                          OGSE: monoexp|ogse_free|ogse_rest|ogse_rest_offset. Default: monoexp
-                          NOGSE: nogse_free_cpmg|nogse_free|nogse_mixed_global. Default: nogse_free
-  SIGNAL_FIT_G_TYPE       Gradient column (also sets the fit x-axis).
-                          OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: bvalue_thorsten
+  SIGNAL_FIT_OUT_ROOT     Output root. Default: $ANALYSIS_ROOT/fits/signal_fit_<model>_<ycol>_vs_<axis>
+  SIGNAL_FIT_MODEL        monoexp only for now. Default: monoexp
+  SIGNAL_FIT_B_AXIS       B-value/gradient axis for monoexp fitting.
+                          OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: bvalue_g
                           NOGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
-  SIGNAL_FIT_XCOL         NOGSE x-axis override. Defaults to SIGNAL_FIT_G_TYPE.
-                          Has no effect for OGSE.
+                          SIGNAL_FIT_G_TYPE is accepted as a backwards-compatible alias.
   SIGNAL_FIT_YCOL         value|value_norm. Default: value_norm
-  SIGNAL_FIT_EXTRA_ARGS   Extra fit_<type_seq>_signal_vs_g.py options (see below).
+  SIGNAL_FIT_AUTO_ARGS    Point-selection flags. Default: --auto_fit_points
+                          Set to "" and use SIGNAL_FIT_EXTRA_ARGS="--fit_points N" for fixed-prefix fits.
+  SIGNAL_FIT_EXTRA_ARGS   Extra fit_signal.py options (see below).
 
 Manifest columns:
   subj, sheet, roi, direction, td_ms, N, Hz, model
 
-Useful SIGNAL_FIT_EXTRA_ARGS (OGSE):
+Useful SIGNAL_FIT_EXTRA_ARGS:
 
   Gradient correction
   -------------------
   --apply_grad_corr
       Scale the gradient axis by the per-direction grad_correction_factor in master rows
-      before fitting. Requires step 10 (grad_correction) to have been run.
+      before fitting. Requires grad_correction to have been run.
       Equivalent to running fit_signal_gradcorr instead of fit_signal.
       Mutually exclusive with --no_grad_corr.
   --no_grad_corr
@@ -564,53 +564,24 @@ Useful SIGNAL_FIT_EXTRA_ARGS (OGSE):
   Fit point selection  [mutually exclusive]
   -----------------------------------------
   --fit_points N
-      Fixed number of leading points to include in the OGSE signal model fit. Default: 6.
+      Fixed number of leading b_step points to include in the monoexp fit. Default: 6
+      if neither --fit_points nor --auto_fit_points is passed.
   --auto_fit_points
-      Automatically choose the number of leading points that minimise the fit residual.
+      Automatically keep the largest leading b_step prefix whose rmse_log remains
+      within tolerance when adding points.
   --auto_fit_tol F        Relative tolerance for --auto_fit_points. Default: 0.05.
   --auto_fit_err_floor F  Absolute RMSE floor before comparing k values. Default: 0.005.
   --auto_fit_min_points N First k tested by --auto_fit_points. Default: 3.
   --auto_fit_max_points N Last k tested by --auto_fit_points. Default: 9.
 
-  Parameter fixing  [each pair is mutually exclusive]
-  ----------------------------------------------------
+  Parameter fixing
+  ----------------
   --fix_M0 F
       Fix M0 to a constant. Default: 1.0.
   --free_M0
       Fit M0 freely (releases the --fix_M0 default).
   --D0_init F
-      Initial D0 seed (mm²/s) for ogse_free/ogse_rest models. Default: 0.0023.
-
-  Overrides (normally inferred from master rows)
-  -----------------------------------------------
-  --td_ms F          Override td_ms.
-  --N F              Override number of gradient lobes N.
-  --delta_ms F       Override delta_ms.
-  --Delta_app_ms F   Override Delta_app_ms.
-
-Useful SIGNAL_FIT_EXTRA_ARGS (NOGSE):
-
-  Gradient correction
-  -------------------
-  --apply_grad_corr / --no_grad_corr   Same semantics as OGSE above.
-
-  Parameter fixing  [each pair is mutually exclusive]
-  ----------------------------------------------------
-  --fix_M0 F / --free_M0   Fix or free M0. Default when ycol=value_norm: fix at 1.0.
-  --fix_D0 F / --free_D0   Fix or free D0 (m²/ms). Default: free.
-
-  Parameter bounds
-  ----------------
-  --M0_bounds MIN MAX   Default: 0.0 inf.
-  --D0_bounds MIN MAX   Default: 1e-16 inf.
-  --tc_bounds MIN MAX   Default: 0.1 1000.0.
-  --tc_init F           Initial tc seed (ms) for model=ogse_mixed_global/nogse_mixed_global. Default: 5.0.
-
-  Mixed-global fit
-  ----------------
-  --alpha_table PATH    Table with fixed alpha per subj/roi/direction/td_ms.
-  --alpha_col COL       Column in --alpha_table. Default: alpha, then alpha_macro.
-  --alpha_td_tol_ms F   Tolerance (ms) for td_ms matching. Default: 0.001.
+      Initial D0 seed (mm2/s). Default: 0.0023.
 
 Examples:
   bash signal_analysis/run_dataset.sh brain ogse fit_signal
@@ -622,12 +593,52 @@ Examples:
   SIGNAL_FIT_EXTRA_ARGS="--auto_fit_points --auto_fit_tol 0.05" \
     bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
-  # ogse_free with gradient correction
-  SIGNAL_FIT_MODEL=ogse_free \
+  # Monoexp with gradient correction
   SIGNAL_FIT_EXTRA_ARGS="--apply_grad_corr --D0_init 0.0023" \
     bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
   bash signal_analysis/run_dataset.sh brain ogse fit_signal_gradcorr
+EOF
+            ;;
+        grad_correction)
+            cat <<'EOF'
+Usage:
+  bash run_dataset.sh <type_subj> <type_seq> grad_correction
+
+What it does:
+  Builds gradient-correction factors from manifests/<type_subj>_<type_seq>/grad_correction.csv.
+  For each manifest curve it fits NOGSE-free D0 and monoexp D0, then writes:
+
+    correction_factor = sqrt(D0_nogse / D0_monoexp_avg)
+
+  The monoexp D0 uses auto_fit_points by default in this step.
+
+Variables for this step:
+  MASTER_PARQUET             Input/output master table.
+  GRAD_CORR_MANIFEST         CSV grad-correction manifest.
+  GRAD_CORR_ROI              Reference ROI override. Default: Syringe for brains, Water1 for phantoms.
+  GRAD_CORR_OUT_DIR          Output directory. Default: $ANALYSIS_ROOT/fits/grad_correction
+  GRAD_CORR_PLOT_DIR         Plot directory. Default: $GRAD_CORR_OUT_DIR/plots
+  GRAD_CORR_AUTO_FIT_ARGS    Auto-fit flags for monoexp D0. Default: --auto_fit_points
+                             Set to "--no_auto_fit_points" to use all valid monoexp points.
+  GRAD_CORR_EXTRA_ARGS       Extra make_grad_correction_table.py options.
+
+Useful GRAD_CORR_EXTRA_ARGS:
+  --bbase bvalue_g|bvalue_thorsten|bvalue   Default: bvalue_g
+  --gbase g|g_lin_max|g_thorsten            Default: g
+  --avg-N 4 8
+  --auto_fit_tol 0.05
+  --auto_fit_min_points 3
+  --auto_fit_max_points 9
+
+Examples:
+  bash signal_analysis/run_dataset.sh brain ogse grad_correction
+
+  GRAD_CORR_EXTRA_ARGS="--bbase bvalue_g --avg-N 4 8" \
+    bash signal_analysis/run_dataset.sh phantom ogse grad_correction
+
+  GRAD_CORR_AUTO_FIT_ARGS="--no_auto_fit_points" \
+    bash signal_analysis/run_dataset.sh brain ogse grad_correction
 EOF
             ;;
         fit_contrast|fit_contrast_free|fit_contrast_mixed_global)
@@ -679,7 +690,7 @@ Useful FIT_EXTRA_ARGS (OGSE and NOGSE):
       Apply the per-direction grad_correction_factor embedded in master contrast rows.
       Only meaningful if the contrast step was run with --apply_grad_corr (direct mode)
       or if the factor columns grad_correction_factor_1/2 are present in the rows.
-      Requires step 10 (grad_correction) to have been run first.
+      Requires grad_correction to have been run first.
       Mutually exclusive with --no_grad_corr.
   --no_grad_corr
       Explicitly skip gradient correction (default behaviour).
@@ -892,60 +903,6 @@ Examples:
     bash signal_analysis/run_dataset.sh brain ogse fit_global_signal
 EOF
             ;;
-        grad_correction)
-            cat <<'EOF'
-Usage:
-  bash run_dataset.sh <type_subj> <type_seq> grad_correction
-
-What it does:
-  Computes gradient-correction factors from the curves listed in grad_correction.csv
-  and embeds them in MASTER_PARQUET. For each manifest row, the Python script fits
-  the same reference curve with NOGSE free and monoexp models, computes
-  correction_factor = sqrt(D0_nogse / D0_monoexp), and writes the factor back to
-  all master rows that share the same subj, sheet, direction, td_ms, and N.
-
-  After the manifest-derived factors are written, any signal rows that still lack
-  a factor (subjects/sessions with no syringe in the manifest) are automatically
-  filled with the cross-subject mean at the same (direction, td_ms, N). Pass
-  --no-fill-missing in GRAD_CORR_EXTRA_ARGS to disable this step.
-
-Variables for this step:
-  GRAD_CORR_SCRIPT      Python script override.
-  GRAD_CORR_MANIFEST    CSV manifest. Default: $MANIFEST_DIR/grad_correction.csv
-                        Columns: subj,sheet,roi,direction,td_ms,N,Hz,model
-  MASTER_PARQUET        Input/output master table. Must contain signal_rotated rows.
-  GRAD_CORR_OUT_DIR     Audit output directory. Default: $ANALYSIS_ROOT/fits/grad_correction
-  GRAD_CORR_ROI         Reference ROI matched against the master table for every
-                        manifest row (overrides the manifest's own roi column;
-                        matching is case-insensitive). Default: Syringe for brains,
-                        Water1 for phantoms.
-  GRAD_CORR_EXTRA_ARGS  Extra make_grad_correction_table.py options.
-
-Useful GRAD_CORR_EXTRA_ARGS:
-  --stat avg               Statistic row to fit. Default: avg
-  --row-kind signal_rotated Input row kind. Default: signal_rotated
-  --gbase g_lin_max        Gradient column for the NOGSE free fit.
-  --bbase bvalue_thorsten  B-value column for the monoexp fit.
-  --ycol value_norm        Signal column to fit: value_norm (default) or value.
-  --D0-init 2.3e-12        NOGSE free D0 seed in m2/ms.
-  --tol-ms 1e-3            Matching tolerance for td_ms.
-  --fix-M0 1.0             Fix M0 in both fits.
-  --free-M0 1.0            Fit M0 in both fits with optional seed.
-  --no-fill-missing        Skip the cross-subject fill for sessions without a syringe.
-
-Examples:
-  bash signal_analysis/run_dataset.sh brain ogse grad_correction
-
-  bash signal_analysis/run_dataset.sh phantoms ogse grad_correction
-
-  GRAD_CORR_ROI=Water2 \
-    bash signal_analysis/run_dataset.sh phantoms ogse grad_correction
-
-  GRAD_CORR_MANIFEST=signal_analysis/manifests/brains_ogse/grad_correction.csv \
-  GRAD_CORR_EXTRA_ARGS="--bbase bvalue_thorsten --fix-M0 1.0" \
-    bash signal_analysis/run_dataset.sh brain ogse grad_correction
-EOF
-            ;;
         plot_monoexp_d)
             cat <<'EOF'
 Usage:
@@ -988,6 +945,10 @@ Variables for this step:
   PLOT_D0_SCRIPT       Python script override for plot_D0_vs_Delta.py.
   ALPHA_N              N selector passed to make_alpha_macro_summary.py. Default: 1
   ALPHA_OUT_DIR        Output directory for all outputs. Default: $ANALYSIS_ROOT/alpha_macro/master
+  ALPHA_PLOT_BSTEPS    Space-separated bvalue positions to use as candidates for
+                       alpha selection and to draw in D-vs-Delta plots.
+  ALPHA_PLOT_BVALUES   Space-separated rounded bvalues to use as candidates for
+                       alpha selection and to draw in D-vs-Delta plots.
   ALPHA_EXTRA_ARGS     Extra options forwarded to make_alpha_macro_summary.py (see below).
   DPROJ_N              N selector for the D-vs-Delta plots (if different from ALPHA_N).
   DPROJ_HZ             Hz selector for the D-vs-Delta plots.
@@ -1003,22 +964,28 @@ Note:
   subj/roi/direction receive repeated alpha_macro values as expected.
 
 Useful ALPHA_EXTRA_ARGS (passed to make_alpha_macro_summary.py):
-  --bvalmax N              Use the N-th bvalue (1-based ascending) for all ROIs.
-                           Default: highest bvalue.
-  --roi-bvalmax ROI=N      Per-ROI bvalue override. Repeatable. The selected bstep
-                           is stored in the summary and reused automatically by the
-                           D-vs-Delta plots without any extra flag.
-                           Example: --roi-bvalmax AntCC=7 --roi-bvalmax CSF=3
+  --bvalmax X              Use bstep X among the candidate bvalues, or use bvalue X
+                           directly when X is outside the candidate bstep range.
+                           Default: highest candidate bvalue.
+  --roi-bvalmax ROI=X      Per-ROI override. X can be a candidate bstep or a bvalue.
+                           Example: --roi-bvalmax CSF=3 or --roi-bvalmax CSF=1280
   --dirs DIR1 DIR2         Restrict summary to specific directions.
   --rois ROI1 ROI2         Restrict summary to specific ROIs.
-  --subjs S1 S2            Restrict summary to specific subjects.
+  --subjs S1 S2            Restrict summary to specific subj values, e.g. MBBL LUDG.
+  --sheets SHEET1 SHEET2   Restrict summary to specific sheet/session names,
+                           e.g. 20230630_MBBL-3 20230710_LUDG-3.
   --reference-D0 F         Reference D0 used to compute alpha_macro. Default: 0.0032
   --no-annotate-master-alpha
                            Do not write alpha_macro back to MASTER_PARQUET.
+                           Useful for testing subset commands.
   --out-plot PATH          Override output path for alpha_macro_vs_roi.png.
 
 Useful PLOT_D0_EXTRA_ARGS (passed only to plot_D0_vs_Delta.py):
   --bvalmax N              Fallback bstep for groups absent in summary_alpha_values.xlsx.
+  --plot-bsteps N1 N2      Plot only these 1-based bvalue positions per group.
+                           Example: --plot-bsteps 1 3 5
+  --plot-bvalues B1 B2     Plot only these rounded bvalues per group.
+                           Example: --plot-bvalues 300 600
   --reference-D0 F         Reference D0 used for the horizontal annotation. Default: 0.0032
 
 Outputs:
@@ -1173,12 +1140,14 @@ pipeline_step_script() {
 pipeline_prepare_step_env() {
     case "$1" in
         fit_signal_gradcorr)
+            SIGNAL_FIT_MODEL="${SIGNAL_FIT_MODEL:-monoexp}"
             if [[ "$TYPE_SEQ" == "nogse" ]]; then
-                SIGNAL_FIT_MODEL="${SIGNAL_FIT_MODEL:-nogse_free}"
                 SIGNAL_FIT_G_TYPE="${SIGNAL_FIT_G_TYPE:-g}"
             else
-                SIGNAL_FIT_MODEL="${SIGNAL_FIT_MODEL:-monoexp}"
-                SIGNAL_FIT_G_TYPE="${SIGNAL_FIT_G_TYPE:-bvalue_thorsten}"
+                SIGNAL_FIT_G_TYPE="${SIGNAL_FIT_G_TYPE:-bvalue_g}"
+                if [[ " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --directions "* && " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --direction "* ]]; then
+                    SIGNAL_FIT_EXTRA_ARGS="${SIGNAL_FIT_EXTRA_ARGS:-} --directions long tra"
+                fi
             fi
             SIGNAL_FIT_EXTRA_ARGS="${SIGNAL_FIT_EXTRA_ARGS:-} --apply_grad_corr"
             export SIGNAL_FIT_MODEL SIGNAL_FIT_G_TYPE SIGNAL_FIT_EXTRA_ARGS

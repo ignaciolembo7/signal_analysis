@@ -48,12 +48,14 @@ signal_analysis/
 │   ├── 01_ingest_results.sh
 │   ├── 02_rotate_signals.sh
 │   ├── 03_plot_signals.sh
+│   ├── 04_fit_signals.sh
 │   ├── 05_make_grad_correction.sh
 │   ├── 06_alpha_macro.sh
 │   ├── 06b_plot_monoexp_D_vs_time.sh
 │   └── 99_export_master_xlsx.sh
 ├── scripts/
 │   ├── data/
+│   ├── fitting/
 │   ├── plotting/
 │   └── summary/
 ├── src/
@@ -273,7 +275,8 @@ analysis/brains/ogse_experiments/
 │   ├── signal/
 │   └── monoexp_D_vs_time/
 ├── fits/
-│   └── grad_correction/
+│   ├── grad_correction/
+│   └── signal_fit_monoexp_value_norm_vs_bvalue_g/
 └── alpha_macro/
 ```
 
@@ -284,6 +287,7 @@ Important outputs:
 | `master.long.parquet` | `ingest` | Canonical long-format master table |
 | `master.last_points.long.parquet` | `filter_master_points` | Filtered master table |
 | rotated signal rows | `rotate` | Tensor-rotated signal directions appended to the master table |
+| `fits/signal_fit_*/*` | `fit_signal` | Monoexponential signal fit parameters, points used, and plots |
 | `fits/grad_correction/*` | `grad_correction` | Correction tables, plots, and updated master factors |
 | `plots-master/signal/*` | `plot_signal` | Signal-vs-gradient figures |
 | `plots-master/monoexp_D_vs_time/*` | `plot_monoexp_d` | Monoexponential D-vs-time figures |
@@ -346,13 +350,15 @@ GRAD_CORR_EXTRA_ARGS="--avg-N --no-fill-missing" \
 | `filter_master_points` | Create a filtered master table using last-points rules |
 | `rotate` | Rotate signal tensor directions |
 | `plot_signal` | Plot signal curves from the master table |
+| `fit_signal` | Fit monoexponential signal curves, with `auto_fit_points` by default |
+| `fit_signal_gradcorr` | Same as `fit_signal`, but applies embedded gradient-correction factors |
 | `grad_correction` | Build and embed gradient-correction factors |
 | `alpha` | Build alpha_macro summaries and D-vs-Delta plots |
 | `plot_monoexp_d` | Plot monoexponential D vs `td_ms` or `Delta_app_ms` |
 | `export_master_xlsx` | Export the selected master parquet to Excel |
 
-The runner also exposes some fitting and contrast steps from the shared code
-base. Use `--help` to see the full current list.
+The runner also exposes additional contrast and global-fit steps from the shared
+code base. Use `--help` to see the full current list.
 
 ## How Variables Behave Across Steps
 
@@ -591,14 +597,126 @@ PLOT_SUBJ=20220622_BRAIN PLOT_DIRECTION=long PLOT_SIGNAL_XCOL=g_thorsten \
   nohup bash signal_analysis/run_dataset.sh brain ogse plot_signal > logs/plot_signal.log 2>&1 &
 ```
 
-### `plot_monoexp_d`
+### `fit_signal`
 
-Requires monoexponential signal fits generated outside this repository, with
-their fit parquets available under `SIGNAL_FITS_ROOT`.
+Fits signal curves from `master.long.parquet`. At the moment this step supports
+only the monoexponential model:
+
+```text
+S(b) = M0 * exp(-b * D0)
+```
+
+The default input row kind is `signal_rotated`, so the usual order is:
+
+```bash
+bash signal_analysis/run_dataset.sh brain ogse ingest rotate fit_signal
+```
+
+By default, `fit_signal` uses `--auto_fit_points`. The automatic selection is
+not an arbitrary subset search. For each curve it sorts points by `b_step`, fits
+leading prefixes, and keeps the largest prefix whose `rmse_log` remains within
+tolerance when the next point is added. The defaults are:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `--auto_fit_min_points` | `3` | First prefix size tested |
+| `--auto_fit_max_points` | `9` | Last prefix size tested |
+| `--auto_fit_tol` | `0.05` | Relative tolerance when comparing consecutive prefixes |
+| `--auto_fit_err_floor` | `0.005` | Minimum previous `rmse_log` used in the comparison |
+
+To use a fixed number of leading points instead, clear the default auto-fit
+args and pass `--fit_points`:
+
+```bash
+SIGNAL_FIT_AUTO_ARGS="" \
+SIGNAL_FIT_EXTRA_ARGS="--fit_points 6" \
+  bash signal_analysis/run_dataset.sh brain ogse fit_signal
+```
+
+Input selection can come from `signal_analysis/manifests/<dataset>/signal_fits.csv`.
+If that manifest is missing, the step warns and fits the selected master rows
+directly. A `signal_fits.csv` manifest may contain:
+
+| Column | Meaning |
+|---|---|
+| `subj` | Subject/group selector, or `ALL` |
+| `sheet` | Sequence-parameter sheet selector, or `ALL` |
+| `roi` | ROI selector, or `ALL` |
+| `direction` | Direction selector, or `ALL` |
+| `td_ms` | Diffusion time selector |
+| `N` | Oscillation count selector |
+| `Hz` | Frequency selector |
+| `model` | Must be `monoexp` for now |
+
+Main variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SIGNAL_FITS_ROOT` | `$ANALYSIS_ROOT/fits/<master>/<experiment>_<model>` | Root scanned for signal fits |
+| `FIT_SIGNAL_SCRIPT` | `$REPO_ROOT/scripts/fitting/fit_signal.py` | Python script |
+| `SIGNAL_FIT_MANIFEST` | `$MANIFEST_DIR/signal_fits.csv` | Optional curve-selection manifest |
+| `SIGNAL_FIT_MODEL` | `monoexp` | Only `monoexp` is supported for now |
+| `SIGNAL_FIT_YCOL` | `value_norm` | Signal column to fit |
+| `SIGNAL_FIT_B_AXIS` | OGSE: `bvalue_g`; NOGSE: `g` | Fit x-axis. `SIGNAL_FIT_G_TYPE` is accepted as an alias |
+| `SIGNAL_FIT_AUTO_ARGS` | `--auto_fit_points` | Point-selection mode |
+| `SIGNAL_FIT_EXTRA_ARGS` | none | Extra arguments for `fit_signal.py` |
+| `SIGNAL_FIT_OUT_ROOT` | `$ANALYSIS_ROOT/fits/signal_fit_<model>_<ycol>_vs_<axis>` | Output directory |
+| `SIGNAL_FIT_PLOT_DIR` | `$SIGNAL_FIT_OUT_ROOT/plots` | Fit-plot directory |
+
+Outputs:
+
+```text
+$SIGNAL_FIT_OUT_ROOT/
+├── signal_fit_params.monoexp.<axis>.<ycol>.parquet
+├── signal_fit_params.monoexp.<axis>.<ycol>.xlsx
+├── signal_fit_points.monoexp.<axis>.<ycol>.parquet
+├── signal_fit_points.monoexp.<axis>.<ycol>.xlsx
+└── plots/
+```
+
+`signal_fit_params` stores one row per fitted curve, including `D0_mm2_s`,
+`M0`, `fit_points`, `n_fit`, `fit_strategy`, `auto_fit_score`, `rmse_log`, and
+the fit status message. `signal_fit_points` stores one row per signal point and
+marks `used_for_fit=True` for the points included in the selected prefix.
+
+Examples:
+
+```bash
+nohup bash signal_analysis/run_dataset.sh brain ogse fit_signal \
+  > logs/04_fit_signal.log 2>&1 &
+
+SIGNAL_FIT_EXTRA_ARGS="--auto_fit_tol 0.10 --auto_fit_max_points 10" \
+  nohup bash signal_analysis/run_dataset.sh brain ogse fit_signal \
+  > logs/04_fit_signal.log 2>&1 &
+
+SIGNAL_FIT_EXTRA_ARGS="--free_M0" \
+  nohup bash signal_analysis/run_dataset.sh brain ogse fit_signal \
+  > logs/04_fit_signal.log 2>&1 &
+```
+
+After `grad_correction` has embedded `grad_correction_factor` in the master
+table, run the corrected preset:
+
+```bash
+nohup bash signal_analysis/run_dataset.sh brain ogse fit_signal_gradcorr \
+  > logs/04_fit_signal_gradcorr.log 2>&1 &
+```
+
+That preset is equivalent to adding `--apply_grad_corr`; it scales the b-axis
+by `correction_factor^2` before fitting. For OGSE it also defaults to
+`--directions long tra` unless a direction filter is already present, because
+the gradient-correction table is normally defined only for those rotated
+directions.
+
+### `plot_monoexp_d`
+
+Plots monoexponential diffusion estimates from signal-fit parquets. The usual
+input is the output of `fit_signal`, but externally generated monoexp fit
+tables can also be used if they follow the expected schema and live under
+`SIGNAL_FITS_ROOT`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SIGNAL_FITS_ROOT` | `$ANALYSIS_ROOT/fits` | Root scanned for signal fits. Set this to a specific `fit_signal` output directory to narrow the scan |
 | `MONOEXP_D_OUT_DIR` | `$ANALYSIS_ROOT/plots-master/monoexp_D_vs_time` | Output directory |
 | `PLOT_MONOEXP_D_EXTRA_ARGS` | none | Extra arguments for `plot_monoexp_D_vs_time.py` |
 
@@ -607,7 +725,7 @@ Examples:
 ```bash
 nohup bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d > logs/plot_monoexp_d.log 2>&1 &
 
-SIGNAL_FITS_ROOT=analysis/brains/ogse_experiments/fits/master/ogse_value_norm_vs_bvaluethorsten_monoexp \
+SIGNAL_FITS_ROOT=analysis/brains/ogse_experiments/fits/signal_fit_monoexp_value_norm_vs_bvalue_g \
   nohup bash signal_analysis/run_dataset.sh brain ogse plot_monoexp_d > logs/plot_monoexp_d.log 2>&1 &
 ```
 
@@ -620,8 +738,15 @@ reference phantom ROI listed in the manifest, then computes:
 correction_factor = sqrt(D0_nogse / D0_monoexp_avg)
 ```
 
+By default, the NOGSE fit uses `g` as the gradient axis and the monoexp fit
+uses `bvalue_g` as the b-value axis.
+
 How `D0_monoexp` is averaged:
 
+- The monoexp fit uses `auto_fit_points` by default in this step. It follows the
+  same leading-prefix rule described in `fit_signal`: sort by `b_step`, test
+  increasing prefix sizes, and keep the largest prefix that remains within the
+  `rmse_log` tolerance.
 - `D0_monoexp` is always averaged across all directions in the manifest that
   share the same `(subj, sheet, roi, td_ms, N)`. `D0_nogse` remains row-specific
   by direction and N so direction-specific gradient errors are preserved.
@@ -640,10 +765,13 @@ that share the same acquisition parameters.
 | `GRAD_CORR_OUT_DIR` | `$ANALYSIS_ROOT/fits/grad_correction` | Output directory for `.xlsx` and `.csv` files |
 | `GRAD_CORR_PLOT_DIR` | `$GRAD_CORR_OUT_DIR/plots` | Output directory for before/after correction plots |
 | `GRAD_CORR_ROI` | `Syringe` for brains, `Water1` for phantoms | Reference ROI matched in the master table |
+| `GRAD_CORR_AUTO_FIT_ARGS` | `--auto_fit_points` | Auto-fit flags for the monoexp `D0` used in the correction |
 | `GRAD_CORR_EXTRA_ARGS` | none | Extra arguments for `make_grad_correction_table.py` |
 
 Useful `GRAD_CORR_EXTRA_ARGS`: `--avg-N`, `--avg-N 4 8`,
-`--no-fill-missing`, `--row-kind signal_rotated`, `--stat avg`, `--free-M0`.
+`--no-fill-missing`, `--row-kind signal_rotated`, `--stat avg`, `--free-M0`,
+`--gbase g`, `--bbase bvalue_g`, `--auto_fit_tol 0.05`,
+`--auto_fit_min_points 3`, `--auto_fit_max_points 9`.
 
 Examples:
 
@@ -663,6 +791,10 @@ GRAD_CORR_EXTRA_ARGS="--no-fill-missing" \
   nohup bash signal_analysis/run_dataset.sh brain ogse grad_correction \
   > logs/05_grad_correction.log 2>&1 &
 
+GRAD_CORR_AUTO_FIT_ARGS="--no_auto_fit_points" \
+  nohup bash signal_analysis/run_dataset.sh brain ogse grad_correction \
+  > logs/05_grad_correction.log 2>&1 &
+
 GRAD_CORR_ROI=Water2 \
   nohup bash signal_analysis/run_dataset.sh phantom ogse grad_correction \
   > logs/05_grad_correction.log 2>&1 &
@@ -670,21 +802,56 @@ GRAD_CORR_ROI=Water2 \
 
 ### `alpha`
 
-Computes macroscopic alpha from signal fits generated outside this repository.
+Computes macroscopic alpha from `D_proj` values in `signal_rotated` master rows.
 Also generates D-vs-Delta_app plots.
 
 | Variable | Default | Description |
 |---|---|---|
 | `ALPHA_N` | `1` | N selector for `make_alpha_macro_summary.py` |
 | `ALPHA_OUT_DIR` | `$ANALYSIS_ROOT/alpha_macro/master` | Output directory |
+| `ALPHA_PLOT_BSTEPS` | none | Candidate b-value positions used for alpha selection and D-vs-Delta plots |
+| `ALPHA_PLOT_BVALUES` | none | Candidate rounded b-values used for alpha selection and D-vs-Delta plots |
 | `ALPHA_EXTRA_ARGS` | none | Extra arguments for `make_alpha_macro_summary.py` |
 | `DPROJ_N` | same as `ALPHA_N` | N selector for D-vs-Delta plots when it should differ from `ALPHA_N` |
-| `DPROJ_DIRS` | none | Direction filter for D-projection |
-| `DPROJ_ROIS` | none | ROI filter for D-projection |
+| `DPROJ_DIRS` | none | Direction filter for D-vs-Delta plots |
+| `DPROJ_ROIS` | none | ROI filter for D-vs-Delta plots |
 | `PLOT_D0_EXTRA_ARGS` | none | Extra arguments only for `plot_D0_vs_Delta.py` |
 
 Useful `ALPHA_EXTRA_ARGS`: `--bvalmax 5`, `--roi-bvalmax AntCC=7`,
-`--dirs long tra`.
+`--dirs long tra`, `--subjs MBBL LUDG`, `--sheets 20230630_MBBL-3`.
+Add `--no-annotate-master-alpha` when testing a subset and you do not want the
+step to write `alpha_macro` back into `master.long.parquet`.
+
+Subject filters:
+
+- `--subjs` filters the master-table `subj` column. In the brain table these
+  are family labels such as `ADBN`, `ARVE`, `BRAIN`, `LUDG`, `MBBL`, `SNVN`.
+- `--sheets` filters the acquisition/session label, for example
+  `20230630_MBBL-3` or `20230710_LUDG-3`.
+
+Use `ALPHA_PLOT_BSTEPS` or `ALPHA_PLOT_BVALUES` when the b-values used for
+alpha should be chosen from the same subset that appears in the D-vs-Delta
+plots:
+
+- `ALPHA_PLOT_BSTEPS="1 3 5"` keeps only those 1-based b-value positions after
+  sorting b-values ascending within each group.
+- `ALPHA_PLOT_BVALUES="500 980 1280 2000"` keeps only those rounded b-values.
+  Values are compared after the `--bvalue-decimals` rounding used by the script.
+
+After the candidate b-values are defined, `--bvalmax` and `--roi-bvalmax` choose
+the b-value used to compute `alpha_macro` and the horizontal annotation. The
+selector can be either a candidate bstep or a b-value:
+
+- `--bvalmax 4` means “use the 4th candidate b-value”.
+- `--bvalmax 2000` means “use b=2000”.
+- `--roi-bvalmax Syringe=3` means “for Syringe, use the 3rd candidate b-value”.
+- `--roi-bvalmax Syringe=1280` means “for Syringe, use b=1280”.
+
+`PLOT_D0_EXTRA_ARGS="--plot-bsteps ..."` and
+`PLOT_D0_EXTRA_ARGS="--plot-bvalues ..."` are still available for plotting-only
+filters, but they do not affect the alpha calculation. Prefer
+`ALPHA_PLOT_BSTEPS` / `ALPHA_PLOT_BVALUES` when alpha and plots should use the
+same b-value subset.
 
 Outputs under `$ALPHA_OUT_DIR/`:
 
@@ -697,6 +864,18 @@ Examples:
 
 ```bash
 ALPHA_N=1 ALPHA_EXTRA_ARGS="--bvalmax 5 --roi-bvalmax Left-Lateral-Ventricle=5 --roi-bvalmax Right-Lateral-Ventricle=5 --roi-bvalmax Syringe=7 --dirs long tra" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
+
+ALPHA_N=1 ALPHA_EXTRA_ARGS="--subjs MBBL LUDG --bvalmax 4 --roi-bvalmax Left-Lateral-Ventricle=2 --roi-bvalmax Right-Lateral-Ventricle=2 --roi-bvalmax Syringe=3 --dirs long tra" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
+
+ALPHA_N=1 ALPHA_EXTRA_ARGS="--sheets 20230630_MBBL-3 20230710_LUDG-3 --bvalmax 4 --roi-bvalmax Left-Lateral-Ventricle=2 --roi-bvalmax Right-Lateral-Ventricle=2 --roi-bvalmax Syringe=3 --dirs long tra" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
+
+ALPHA_N=1 ALPHA_EXTRA_ARGS="--subjs MBBL --bvalmax 4 --dirs long tra" PLOT_D0_EXTRA_ARGS="--plot-bsteps 1 2 4" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
+
+ALPHA_N=1 ALPHA_EXTRA_ARGS="--subjs MBBL --bvalmax 4 --dirs long tra" PLOT_D0_EXTRA_ARGS="--plot-bvalues 250 500 750" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
+
+ALPHA_N=1 ALPHA_PLOT_BVALUES="500 980 1280 2000" ALPHA_EXTRA_ARGS="--subjs BRAIN MBBL LUDG --bvalmax 4 --roi-bvalmax Left-Lateral-Ventricle=1 --roi-bvalmax Right-Lateral-Ventricle=1 --roi-bvalmax Syringe=3 --dirs long tra --rois Left-Lateral-Ventricle Right-Lateral-Ventricle Syringe" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
+
+ALPHA_N=1 ALPHA_PLOT_BVALUES="500 980 1280 2000" ALPHA_EXTRA_ARGS="--subjs BRAIN MBBL LUDG --bvalmax 2000 --roi-bvalmax Left-Lateral-Ventricle=500 --roi-bvalmax Right-Lateral-Ventricle=500 --roi-bvalmax Syringe=1280 --dirs long tra --rois Left-Lateral-Ventricle Right-Lateral-Ventricle Syringe" nohup bash signal_analysis/run_dataset.sh brain ogse alpha > logs/alpha.log 2>&1 &
 
 ALPHA_EXTRA_ARGS="--bvalmax 5 --roi-bvalmax Syringe=7" nohup bash signal_analysis/run_dataset.sh phantom ogse alpha > logs/alpha.log 2>&1 &
 ```
