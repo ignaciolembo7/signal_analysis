@@ -12,6 +12,13 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit, minimize_scalar
 
+from monoexp_fitting.fit_signal import (
+    AUTO_FIT_ERR_FLOOR,
+    AUTO_FIT_MAX_POINTS,
+    AUTO_FIT_MIN_POINTS,
+    AUTO_FIT_REL_TOL,
+    select_monoexp_fit_result,
+)
 from models.model_fitting import M_nogse_free
 from tools.brain_labels import canonical_sheet_name
 
@@ -127,6 +134,11 @@ def _fit_monoexp(
     D0_init_mm2_s: float,
     M0_value: float,
     M0_vary: bool,
+    auto_fit_points: bool = False,
+    auto_fit_min_points: int = AUTO_FIT_MIN_POINTS,
+    auto_fit_max_points: int | None = AUTO_FIT_MAX_POINTS,
+    auto_fit_rel_tol: float = AUTO_FIT_REL_TOL,
+    auto_fit_err_floor: float = AUTO_FIT_ERR_FLOOR,
 ) -> dict:
     """
     Fit S = M0 * exp(-b * D0) where b in s/mm2, D0 in mm2/s.
@@ -135,63 +147,48 @@ def _fit_monoexp(
     """
     b = np.asarray(b, dtype=float)
     y = np.asarray(y, dtype=float)
-    valid = np.isfinite(b) & np.isfinite(y) & (y > 0) & (b >= 0)
-    b_fit = b[valid]
-    y_fit = y[valid]
-    n_fit = int(len(b_fit))
-
-    if n_fit < 3:
+    valid_total = int(np.sum(np.isfinite(b) & np.isfinite(y) & (y > 0) & (b >= 0)))
+    fit_points = None if auto_fit_points else len(b)
+    result = select_monoexp_fit_result(
+        b,
+        y,
+        fit_points=fit_points,
+        auto_fit_points=bool(auto_fit_points),
+        free_M0=bool(M0_vary),
+        fix_M0=float(M0_value),
+        D0_init=float(D0_init_mm2_s),
+        auto_fit_min_points=int(auto_fit_min_points),
+        auto_fit_max_points=auto_fit_max_points,
+        auto_fit_rel_tol=float(auto_fit_rel_tol),
+        auto_fit_err_floor=float(auto_fit_err_floor),
+    )
+    if not result.get('ok', False):
         return {
-            'ok': False, 'n_fit': n_fit,
+            'ok': False,
+            'n_fit': int(result.get('n_fit', valid_total)),
+            'fit_points': result.get('fit_points', np.nan),
+            'fit_strategy': result.get('fit_strategy', 'auto' if auto_fit_points else 'fixed'),
+            'auto_fit_metric': result.get('auto_fit_metric', np.nan),
+            'auto_fit_score': result.get('auto_fit_score', np.nan),
+            'rmse_log': result.get('rmse_log', np.nan),
             'M0': np.nan, 'D0_mm2_s': np.nan, 'D0_m2_ms': np.nan,
-            'rmse': np.nan, 'msg': 'Too few valid points.',
+            'rmse': np.nan, 'msg': str(result.get('msg', '')),
         }
 
-    order = np.argsort(b_fit)
-    b_fit = b_fit[order]
-    y_fit = y_fit[order]
-
-    D0_seed = float(D0_init_mm2_s) if np.isfinite(D0_init_mm2_s) and D0_init_mm2_s > 0 else 2.3e-3
-    D_lo = max(D0_seed / 100.0, 1e-12)
-    D_hi = min(D0_seed * 100.0, 1.0)
-
-    try:
-        if M0_vary:
-            def model(b_, M0, D0):
-                return M0 * np.exp(-b_ * D0)
-            popt, _ = curve_fit(
-                model, b_fit, y_fit,
-                p0=[float(M0_value), D0_seed],
-                bounds=([0.0, D_lo], [5.0, D_hi]),
-                maxfev=40000,
-            )
-            D0 = float(popt[1])
-            M0 = float(popt[0])
-        else:
-            M0_fix = float(M0_value)
-            def model_fixed(b_, D0):
-                return M0_fix * np.exp(-b_ * D0)
-            popt, _ = curve_fit(
-                model_fixed, b_fit, y_fit,
-                p0=[D0_seed],
-                bounds=([D_lo], [D_hi]),
-                maxfev=40000,
-            )
-            D0 = float(popt[0])
-            M0 = M0_fix
-
-        yhat = M0 * np.exp(-b_fit * D0)
-        return {
-            'ok': True, 'n_fit': n_fit,
-            'M0': M0, 'D0_mm2_s': D0, 'D0_m2_ms': D0 * 1e-9,
-            'rmse': _rmse(y_fit, yhat), 'msg': '',
-        }
-    except Exception as exc:
-        return {
-            'ok': False, 'n_fit': n_fit,
-            'M0': np.nan, 'D0_mm2_s': np.nan, 'D0_m2_ms': np.nan,
-            'rmse': np.nan, 'msg': str(exc),
-        }
+    return {
+        'ok': True,
+        'n_fit': int(result.get('n_fit', valid_total)),
+        'fit_points': result.get('fit_points', np.nan),
+        'fit_strategy': result.get('fit_strategy', 'auto' if auto_fit_points else 'fixed'),
+        'auto_fit_metric': result.get('auto_fit_metric', np.nan),
+        'auto_fit_score': result.get('auto_fit_score', np.nan),
+        'rmse_log': result.get('rmse_log', np.nan),
+        'M0': float(result['M0']),
+        'D0_mm2_s': float(result['D0_mm2_s']),
+        'D0_m2_ms': float(result['D0_m2_ms']),
+        'rmse': float(result['rmse']),
+        'msg': str(result.get('msg', '')),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -283,8 +280,8 @@ def make_grad_correction_from_manifest(
     *,
     stat_keep: str = 'avg',
     row_kind: str = 'signal_rotated',
-    gbase: str = 'g_lin_max',
-    bbase: str = 'bvalue_thorsten',
+    gbase: str = 'g',
+    bbase: str = 'bvalue_g',
     ycol: str = 'value_norm',
     M0_vary: bool = False,
     M0_value: float = 1.0,
@@ -293,6 +290,11 @@ def make_grad_correction_from_manifest(
     avg_N: list[int] | None = None,
     plot_dir: Path | None = None,
     roi_override: str | None = None,
+    monoexp_auto_fit_points: bool = False,
+    monoexp_auto_fit_min_points: int = AUTO_FIT_MIN_POINTS,
+    monoexp_auto_fit_max_points: int | None = AUTO_FIT_MAX_POINTS,
+    monoexp_auto_fit_rel_tol: float = AUTO_FIT_REL_TOL,
+    monoexp_auto_fit_err_floor: float = AUTO_FIT_ERR_FLOOR,
 ) -> pd.DataFrame:
     """
     Read the grad-correction manifest and the master parquet, then for each
@@ -388,7 +390,8 @@ def make_grad_correction_from_manifest(
                   f'dir={direction} td_ms={td_ms} N={N}')
             continue
 
-        curve_sorted = curve.sort_values(g_col)
+        sort_col = 'b_step' if 'b_step' in curve.columns else g_col
+        curve_sorted = curve.sort_values(sort_col)
         G = pd.to_numeric(curve_sorted[g_col], errors='coerce').to_numpy(dtype=float)
         b = pd.to_numeric(curve_sorted[b_col], errors='coerce').to_numpy(dtype=float)
         y = pd.to_numeric(curve_sorted[ycol], errors='coerce').to_numpy(dtype=float)
@@ -401,6 +404,11 @@ def make_grad_correction_from_manifest(
             b=b, y=y,
             D0_init_mm2_s=D0_init_mm2_s,
             M0_value=M0_value, M0_vary=M0_vary,
+            auto_fit_points=monoexp_auto_fit_points,
+            auto_fit_min_points=monoexp_auto_fit_min_points,
+            auto_fit_max_points=monoexp_auto_fit_max_points,
+            auto_fit_rel_tol=monoexp_auto_fit_rel_tol,
+            auto_fit_err_floor=monoexp_auto_fit_err_floor,
         )
 
         D0_nogse = fit_nogse.get('D0_m2_ms', np.nan)
@@ -435,12 +443,17 @@ def make_grad_correction_from_manifest(
             'ok_monoexp': bool(fit_mono.get('ok', False)),
             'n_fit_nogse': int(fit_nogse.get('n_fit', 0)),
             'n_fit_monoexp': int(fit_mono.get('n_fit', 0)),
+            'fit_points_monoexp': fit_mono.get('fit_points', np.nan),
+            'fit_strategy_monoexp': fit_mono.get('fit_strategy', np.nan),
+            'auto_fit_metric_monoexp': fit_mono.get('auto_fit_metric', np.nan),
+            'auto_fit_score_monoexp': fit_mono.get('auto_fit_score', np.nan),
             'D0_fit_nogse_m2_ms': float(D0_nogse) if np.isfinite(D0_nogse) else np.nan,
             'D0_fit_nogse_mm2_s': float(D0_nogse * 1e9) if np.isfinite(D0_nogse) else np.nan,
             'D0_fit_monoexp_mm2_s': float(fit_mono.get('D0_mm2_s', np.nan)),
             'D0_fit_monoexp_m2_ms': float(D0_mono) if np.isfinite(D0_mono) else np.nan,
             'rmse_nogse': float(fit_nogse.get('rmse', np.nan)),
             'rmse_monoexp': float(fit_mono.get('rmse', np.nan)),
+            'rmse_log_monoexp': float(fit_mono.get('rmse_log', np.nan)),
             'g_col': g_col,
             'b_col': b_col,
             'msg_nogse': str(fit_nogse.get('msg', '')),

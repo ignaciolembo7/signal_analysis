@@ -60,12 +60,12 @@ def main() -> None:
         help='row_kind to load from master (default: signal_rotated).',
     )
     ap.add_argument(
-        '--gbase', default='g_lin_max',
-        help='Gradient column for NOGSE free fit (default: g_lin_max).',
+        '--gbase', default='g',
+        help='Gradient column for NOGSE free fit (default: g).',
     )
     ap.add_argument(
-        '--bbase', default='bvalue_thorsten',
-        help='B-value column for monoexp fit (default: bvalue_thorsten).',
+        '--bbase', default='bvalue_g',
+        help='B-value column for monoexp fit (default: bvalue_g).',
     )
     ap.add_argument(
         '--ycol', default='value_norm',
@@ -96,6 +96,55 @@ def main() -> None:
         ),
     )
 
+    auto_group = ap.add_mutually_exclusive_group()
+    auto_group.add_argument(
+        '--auto-fit-points',
+        '--auto_fit_points',
+        dest='auto_fit_points',
+        action='store_true',
+        help='Use sequential auto_fit_points for the monoexp D0 used in grad_correction.',
+    )
+    auto_group.add_argument(
+        '--no-auto-fit-points',
+        '--no_auto_fit_points',
+        dest='auto_fit_points',
+        action='store_false',
+        help='Fit monoexp D0 with all valid points.',
+    )
+    ap.set_defaults(auto_fit_points=False)
+    ap.add_argument(
+        '--auto-fit-tol',
+        '--auto_fit_tol',
+        dest='auto_fit_tol',
+        type=float,
+        default=0.05,
+        help='Relative rmse_log tolerance for monoexp auto_fit_points (default: 0.05).',
+    )
+    ap.add_argument(
+        '--auto-fit-err-floor',
+        '--auto_fit_err_floor',
+        dest='auto_fit_err_floor',
+        type=float,
+        default=0.005,
+        help='rmse_log floor used before comparing consecutive k values (default: 0.005).',
+    )
+    ap.add_argument(
+        '--auto-fit-min-points',
+        '--auto_fit_min_points',
+        dest='auto_fit_min_points',
+        type=int,
+        default=3,
+        help='First k tested by monoexp auto_fit_points (default: 3).',
+    )
+    ap.add_argument(
+        '--auto-fit-max-points',
+        '--auto_fit_max_points',
+        dest='auto_fit_max_points',
+        type=int,
+        default=9,
+        help='Last k tested by monoexp auto_fit_points (default: 9).',
+    )
+
     ap.add_argument(
         '--no-fill-missing',
         action='store_true',
@@ -117,6 +166,14 @@ def main() -> None:
     )
 
     args = ap.parse_args()
+    if args.auto_fit_tol < 0:
+        raise ValueError('--auto-fit-tol must be >= 0.')
+    if args.auto_fit_err_floor < 0:
+        raise ValueError('--auto-fit-err-floor must be >= 0.')
+    if args.auto_fit_min_points < 1:
+        raise ValueError('--auto-fit-min-points must be >= 1.')
+    if args.auto_fit_max_points is not None and args.auto_fit_max_points < args.auto_fit_min_points:
+        raise ValueError('--auto-fit-max-points must be >= --auto-fit-min-points.')
 
     M0_vary = args.free_M0 is not None
     M0_value = float(args.free_M0) if args.free_M0 is not None else float(args.fix_M0)
@@ -136,6 +193,11 @@ def main() -> None:
         avg_N=args.avg_N,
         plot_dir=args.plot_dir,
         roi_override=args.roi,
+        monoexp_auto_fit_points=bool(args.auto_fit_points),
+        monoexp_auto_fit_min_points=int(args.auto_fit_min_points),
+        monoexp_auto_fit_max_points=args.auto_fit_max_points,
+        monoexp_auto_fit_rel_tol=float(args.auto_fit_tol),
+        monoexp_auto_fit_err_floor=float(args.auto_fit_err_floor),
     )
 
     out_xlsx = Path(args.out_xlsx)

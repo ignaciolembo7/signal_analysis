@@ -10,6 +10,7 @@ GRAD_CORR_SCRIPT="${GRAD_CORR_SCRIPT:-$REPO_ROOT/scripts/data/make_grad_correcti
 GRAD_CORR_MANIFEST="${GRAD_CORR_MANIFEST:-$MANIFEST_DIR/grad_correction.csv}"
 GRAD_CORR_OUT_DIR="${GRAD_CORR_OUT_DIR:-$ANALYSIS_ROOT/fits/grad_correction}"
 GRAD_CORR_PLOT_DIR="${GRAD_CORR_PLOT_DIR:-$GRAD_CORR_OUT_DIR/plots}"
+GRAD_CORR_AUTO_FIT_ARGS="${GRAD_CORR_AUTO_FIT_ARGS:---auto_fit_points}"
 
 case "$DATASET" in
     brains)   GRAD_CORR_ROI="${GRAD_CORR_ROI:-Syringe}" ;;
@@ -28,4 +29,5 @@ mkdir -p "$GRAD_CORR_OUT_DIR"
     --out-csv "$GRAD_CORR_OUT_DIR/grad_correction.csv" \
     --plot-dir "$GRAD_CORR_PLOT_DIR" \
     --roi "$GRAD_CORR_ROI" \
+    ${GRAD_CORR_AUTO_FIT_ARGS:-} \
     ${GRAD_CORR_EXTRA_ARGS:-}
