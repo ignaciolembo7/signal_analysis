@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 
+pipeline_resolve_project_root() {
+    local start="$1"
+    local dir
+    dir="$(cd "$start" && pwd)"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/Data-BIDS" || -d "$dir/Data-DICOM" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "ERROR: could not resolve project root from: $start" >&2
+    return 1
+}
+
 pipeline_setup_common() {
     MASTER_HELPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     REPO_ROOT="$(cd "$MASTER_HELPER_DIR/.." && pwd)"
     TEMPLATE_ROOT="$REPO_ROOT"
-    PROJECT_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
+    PROJECT_ROOT="${PROJECT_ROOT:-$(pipeline_resolve_project_root "$REPO_ROOT")}"
 
     export PYTHONPATH="$REPO_ROOT/src:${PYTHONPATH:-}"
     export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"

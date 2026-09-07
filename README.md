@@ -78,19 +78,23 @@ Run commands from `PROJECT_ROOT`, the directory that contains `Data-BIDS/`,
 PROJECT_ROOT/
 ├── Data-BIDS/
 ├── analysis/
-├── dicom_to_bids/
-├── img_preprocessing/
-├── img_segmentation/
-├── signal_extraction/
-└── signal_analysis/
+└── repos/
+    ├── dicom_to_bids/
+    ├── img_preprocessing/
+    ├── img_segmentation/
+    ├── signal_extraction/
+    └── signal_analysis/
 ```
+
+The scripts also support the older layout where the repositories live directly
+under `PROJECT_ROOT`.
 
 ## Installation
 
 Clone the repository inside the same `PROJECT_ROOT` that contains `Data-BIDS/`:
 
 ```bash
-cd /path/to/PROJECT_ROOT
+cd /path/to/PROJECT_ROOT/repos
 git clone git@github.com:YOUR_USERNAME/signal_analysis.git
 cd signal_analysis
 ```
@@ -98,7 +102,7 @@ cd signal_analysis
 If you use HTTPS instead of SSH:
 
 ```bash
-cd /path/to/PROJECT_ROOT
+cd /path/to/PROJECT_ROOT/repos
 git clone https://github.com/YOUR_USERNAME/signal_analysis.git
 cd signal_analysis
 ```
