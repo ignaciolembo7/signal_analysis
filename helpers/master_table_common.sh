@@ -94,8 +94,11 @@ pipeline_set_dataset_defaults() {
             ;;
     esac
 
-    ANALYSIS_TAG="${ANALYSIS_TAG:-${SIGNAL_EXTRACTION_TAG}--${dataset}}"
-    ANALYSIS_ROOT="${ANALYSIS_ROOT:-$PROJECT_ROOT/analysis/$ANALYSIS_TAG/$EXPERIMENT_ROOT_NAME}"
+    # Mirror the signal-extraction provenance in the analysis tree. Keeping
+    # the dataset as a child directory makes one extraction tag easy to audit
+    # without flattening provenance and dataset into a synthetic name.
+    ANALYSIS_TAG="${ANALYSIS_TAG:-${SIGNAL_EXTRACTION_TAG}/${dataset}}"
+    ANALYSIS_ROOT="${ANALYSIS_ROOT:-$PROJECT_ROOT/Data-BIDS/derivatives/signal_analysis/$ANALYSIS_TAG/$EXPERIMENT_ROOT_NAME}"
 
     MASTER_PARQUET="${MASTER_PARQUET:-$ANALYSIS_ROOT/master.long.parquet}"
     MANIFEST_DIR="${MANIFEST_DIR:-$TEMPLATE_ROOT/manifests/${dataset}_${type_seq}}"
@@ -111,6 +114,31 @@ pipeline_require_file() {
         echo "ERROR: $label not found: $path" >&2
         exit 1
     fi
+}
+
+pipeline_ensure_derivative_description() {
+    local derivative_root="$PROJECT_ROOT/Data-BIDS/derivatives/signal_analysis"
+    case "$ANALYSIS_ROOT" in
+        "$derivative_root"|"$derivative_root"/*) ;;
+        *) return 0 ;;
+    esac
+    mkdir -p "$derivative_root"
+    if [[ -f "$derivative_root/dataset_description.json" ]]; then
+        return 0
+    fi
+    cat > "$derivative_root/dataset_description.json" <<'JSON'
+{
+  "Name": "signal_analysis derivatives",
+  "BIDSVersion": "1.10.0",
+  "DatasetType": "derivative",
+  "GeneratedBy": [
+    {
+      "Name": "signal_analysis",
+      "Description": "Signal rotation, correction, fitting, plotting, and summary analysis."
+    }
+  ]
+}
+JSON
 }
 
 pipeline_apply_master_last_points() {
@@ -231,10 +259,11 @@ Common environment variables:
   SIGNAL_EXTRACTION_LAYOUT
                      flat (default) reads signal_extraction/$SIGNAL_EXTRACTION_TAG.
                      nested reads legacy signal_extraction/$DWI_LEVEL/$ROI_VARIANT.
-  ANALYSIS_TAG       Default: $SIGNAL_EXTRACTION_TAG--<brains|phantoms>.
+  ANALYSIS_TAG       Default: $SIGNAL_EXTRACTION_TAG/<brains|phantoms>.
   PARAMS_XLSX        Sequence-parameter workbook.
   ANALYSIS_ROOT      Output analysis root.
-                     Default: analysis/$ANALYSIS_TAG/<ogse|nogse>_experiments.
+                     Default: Data-BIDS/derivatives/signal_analysis/$ANALYSIS_TAG/
+                     <ogse|nogse>_experiments.
   MASTER_PARQUET     Master table path.
   MANIFEST_DIR       Directory with contrasts.csv, signal_fits.csv, and grad_correction.csv.
   MASTER_LAST_POINTS_BY_TD
@@ -254,8 +283,8 @@ Master table format:
   appends to parquet. To inspect it in Excel, export a copy explicitly:
 
     python signal_analysis/scripts/data/export_master_table.py \
-      analysis/den_gr-topup--plain--brains/ogse_experiments/master.long.parquet \
-      --out-xlsx analysis/den_gr-topup--plain--brains/ogse_experiments/master.inspect.xlsx
+      Data-BIDS/derivatives/signal_analysis/den_gr-topup--plain/brains/ogse_experiments/master.long.parquet \
+      --out-xlsx Data-BIDS/derivatives/signal_analysis/den_gr-topup--plain/brains/ogse_experiments/master.inspect.xlsx
 
 Examples:
   # Ingest one signal_extraction Results folder.
@@ -318,7 +347,7 @@ Variables for this step:
                       Flat signal_extraction output tag. Default: $DWI_LEVEL--$ROI_VARIANT.
   SIGNAL_EXTRACTION_LAYOUT
                       flat (default) or nested for legacy $DWI_LEVEL/$ROI_VARIANT paths.
-  ANALYSIS_TAG        Default: $SIGNAL_EXTRACTION_TAG--<brains|phantoms>.
+  ANALYSIS_TAG        Default: $SIGNAL_EXTRACTION_TAG/<brains|phantoms>.
   PARAMS_XLSX         Sequence-parameter workbook.
   RESULTS_GLOB        Results filename pattern. Default: *_results.xlsx
   MASTER_PARQUET      Master table output.
@@ -396,7 +425,7 @@ What it does:
 
 Variables for this step:
   MASTER_PARQUET           Input master table.
-  MASTER_XLSX              Output Excel path. Default: MASTER_PARQUET with .xlsx suffix.
+  MASTER_XLSX              Output Excel path. Default: replace .long.parquet with .xlsx.
   EXPORT_MASTER_ROW_KIND   Optional row_kind filter. Space- or comma-separated.
   EXPORT_MASTER_HEAD       Optional number of first rows to export.
   EXPORT_MASTER_SCRIPT     Python script override.
@@ -544,7 +573,8 @@ What it does:
 Variables for this step:
   MASTER_PARQUET          Input master table.
   PLOT_SIGNAL_SCRIPT      Python script override.
-  PLOT_OUT_ROOT           Output root. Default: $ANALYSIS_ROOT/plots-master/signal
+  PLOT_OUT_ROOT           Output root. Default:
+                          $ANALYSIS_ROOT/plots-master/signal/<PLOT_ROW_KIND>
   PLOT_ROW_KIND           signal_rotated|signal. Default: signal_rotated
   PLOT_SUBJ               Optional subj selector.
   PLOT_SHEET              Optional sheet selector.
@@ -1233,6 +1263,8 @@ pipeline_run_steps() {
         pipeline_usage
         return 0
     fi
+
+    pipeline_ensure_derivative_description
 
     local step script
     for step in $raw_steps; do

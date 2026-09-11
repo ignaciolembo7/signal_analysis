@@ -13,13 +13,21 @@ else
     PLOT_SIGNAL_SCRIPT="${PLOT_SIGNAL_SCRIPT:-$REPO_ROOT/scripts/plotting/plot_ogse_signal_vs_g.py}"
     DEFAULT_PLOT_SIGNAL_XCOL="${DEFAULT_PLOT_SIGNAL_XCOL:-g_thorsten}"
 fi
-PLOT_OUT_ROOT="${PLOT_OUT_ROOT:-$ANALYSIS_ROOT/plots-master/signal}"
+PLOT_ROW_KIND="${PLOT_ROW_KIND:-signal_rotated}"
+case "$PLOT_ROW_KIND" in
+    signal|signal_rotated) ;;
+    *)
+        echo "ERROR: PLOT_ROW_KIND must be signal or signal_rotated, got: $PLOT_ROW_KIND" >&2
+        exit 2
+        ;;
+esac
+PLOT_OUT_ROOT="${PLOT_OUT_ROOT:-$ANALYSIS_ROOT/plots-master/signal/$PLOT_ROW_KIND}"
 
 pipeline_require_file "$PLOT_SIGNAL_SCRIPT" "plot signal script"
 pipeline_require_file "$MASTER_PARQUET" "master table"
 mkdir -p "$PLOT_OUT_ROOT"
 
-args=(--master-parquet "$MASTER_PARQUET" --out_root "$PLOT_OUT_ROOT" --row-kind "${PLOT_ROW_KIND:-signal_rotated}")
+args=(--master-parquet "$MASTER_PARQUET" --out_root "$PLOT_OUT_ROOT" --row-kind "$PLOT_ROW_KIND")
 [[ "${PLOT_SUBJ:-ALL}" != "ALL" ]] && args+=(--subj "$PLOT_SUBJ")
 [[ "${PLOT_SHEET:-ALL}" != "ALL" ]] && args+=(--sheet "$PLOT_SHEET")
 [[ "${PLOT_ROI:-ALL}" != "ALL" ]] && args+=(--roi "$PLOT_ROI")

@@ -7,7 +7,13 @@ pipeline_setup_common
 pipeline_set_dataset_defaults "${TYPE_SUBJ:-${DATASET:?TYPE_SUBJ or DATASET is required}}"
 
 EXPORT_MASTER_SCRIPT="${EXPORT_MASTER_SCRIPT:-$REPO_ROOT/scripts/data/export_master_table.py}"
-MASTER_XLSX="${MASTER_XLSX:-${MASTER_PARQUET%.parquet}.xlsx}"
+if [[ -z "${MASTER_XLSX:-}" ]]; then
+    if [[ "$MASTER_PARQUET" == *.long.parquet ]]; then
+        MASTER_XLSX="${MASTER_PARQUET%.long.parquet}.xlsx"
+    else
+        MASTER_XLSX="${MASTER_PARQUET%.parquet}.xlsx"
+    fi
+fi
 
 pipeline_require_file "$EXPORT_MASTER_SCRIPT" "master export script"
 pipeline_require_file "$MASTER_PARQUET" "master table"
