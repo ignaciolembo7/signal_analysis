@@ -48,6 +48,7 @@ htmlcov/
 # Notebooks
 # =========================
 .ipynb_checkpoints/
+/notebooks/outputs/
 
 # =========================
 # IDE / Editor / OS

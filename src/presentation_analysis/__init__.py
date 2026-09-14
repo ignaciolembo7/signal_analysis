@@ -1,0 +1,41 @@
+"""Reusable analysis helpers for presentation notebooks."""
+
+from .abstract_figures import (
+    CC_ROIS,
+    DEFAULT_DIRECTIONS,
+    aggregate_alpha,
+    build_resampled_contrasts,
+    compare_with_reference,
+    compare_with_reference_metrics,
+    discover_analysis_runs,
+    export_all_signal_contrast_panels,
+    fit_tc_pseudohuber,
+    load_alpha_summaries,
+    load_masters,
+    master_qc_summary,
+    merge_alpha_delta,
+    plot_alpha_delta_scatter,
+    plot_contrast_lcf_grid,
+    plot_metric_comparison,
+    plot_signal_contrast_example,
+)
+
+__all__ = [
+    "CC_ROIS",
+    "DEFAULT_DIRECTIONS",
+    "aggregate_alpha",
+    "build_resampled_contrasts",
+    "compare_with_reference",
+    "compare_with_reference_metrics",
+    "discover_analysis_runs",
+    "export_all_signal_contrast_panels",
+    "fit_tc_pseudohuber",
+    "load_alpha_summaries",
+    "load_masters",
+    "master_qc_summary",
+    "merge_alpha_delta",
+    "plot_alpha_delta_scatter",
+    "plot_contrast_lcf_grid",
+    "plot_metric_comparison",
+    "plot_signal_contrast_example",
+]
