@@ -18,6 +18,7 @@ from monoexp_fitting.fit_signal import (
     fit_signal_monoexp,
     write_fit_outputs,
 )
+from ogse_fitting.fit_ogse_free_signal import fit_ogse_free_signal
 
 
 def _split_optional(values: list[str] | None) -> list[str] | None:
@@ -47,10 +48,18 @@ def _filter_text(df: pd.DataFrame, col: str, value: object) -> pd.DataFrame:
     return df[df[col].astype(str).str.strip() == text].copy()
 
 
-def _selected_from_manifest(master: pd.DataFrame, manifest_row: pd.Series, *, default_row_kind: str) -> pd.DataFrame:
+def _selected_from_manifest(
+    master: pd.DataFrame,
+    manifest_row: pd.Series,
+    *,
+    default_row_kind: str,
+    requested_model: str,
+) -> pd.DataFrame:
     model = str(manifest_row.get("model", "monoexp") or "monoexp").strip()
-    if model and model.lower() != "monoexp":
-        raise ValueError(f"fit_signal currently supports only model='monoexp', got {model!r}.")
+    if model and model.lower() not in {requested_model.lower(), "all"}:
+        raise ValueError(
+            f"Signal-fit manifest requests model={model!r}, but the command requests {requested_model!r}."
+        )
 
     selectors: dict[str, object] = {"row_kind": default_row_kind}
     for col in ["subj", "sheet", "roi", "direction"]:
@@ -70,40 +79,49 @@ def _run_one_selection(
     directions: list[str] | None = None,
     rois: list[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    outputs = fit_signal_monoexp(
-        df,
+    common = dict(
+        df=df,
         directions=directions,
         rois=rois,
         ycol=args.ycol,
-        b_axis=args.b_axis,
-        fit_points=args.fit_points,
-        auto_fit_points=bool(args.auto_fit_points),
-        auto_fit_min_points=int(args.auto_fit_min_points),
-        auto_fit_max_points=args.auto_fit_max_points,
-        auto_fit_rel_tol=float(args.auto_fit_tol),
-        auto_fit_err_floor=float(args.auto_fit_err_floor),
         free_M0=bool(args.free_M0),
         fix_M0=float(args.fix_M0),
-        D0_init=float(args.D0_init),
-        gamma=float(args.gamma),
         stat_keep=str(args.stat or "avg"),
         correction_factor_col="grad_correction_factor" if bool(args.apply_grad_corr) else None,
         outdir_plots=Path(args.plot_dir) if args.plot_dir is not None else None,
     )
+    if args.model == "ogse_free":
+        outputs = fit_ogse_free_signal(
+            **common,
+            g_axis=args.b_axis,
+            D0_init_mm2_s=float(args.D0_init),
+        )
+    else:
+        outputs = fit_signal_monoexp(
+            **common,
+            b_axis=args.b_axis,
+            fit_points=args.fit_points,
+            auto_fit_points=bool(args.auto_fit_points),
+            auto_fit_min_points=int(args.auto_fit_min_points),
+            auto_fit_max_points=args.auto_fit_max_points,
+            auto_fit_rel_tol=float(args.auto_fit_tol),
+            auto_fit_err_floor=float(args.auto_fit_err_floor),
+            D0_init=float(args.D0_init),
+            gamma=float(args.gamma),
+        )
     return outputs.fit_params, outputs.fit_points
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
-            "Fit signal curves with monoexp model and optional auto_fit_points. "
-            "The automatic mode tests leading b_step prefixes and keeps adding "
-            "points while rmse_log remains within tolerance."
+            "Fit signal curves with a monoexponential or OGSE free-diffusion model. "
+            "Monoexponential automatic mode tests leading b_step prefixes."
         )
     )
     ap.add_argument("table", type=Path, nargs="?", help="Optional legacy signal table parquet/xlsx/csv.")
     ap.add_argument("--manifest", type=Path, default=None, help="Optional signal_fits.csv manifest.")
-    ap.add_argument("--model", default="monoexp", choices=["monoexp"])
+    ap.add_argument("--model", default="monoexp", choices=["monoexp", "ogse_free"])
     ap.add_argument("--out-root", "--out_root", dest="out_root", type=Path, required=True)
     ap.add_argument("--plot-dir", "--plot_dir", dest="plot_dir", type=Path, default=None)
     ap.add_argument("--ycol", default="value_norm", choices=["value", "value_norm"])
@@ -114,7 +132,11 @@ def main() -> None:
     fit_group = ap.add_mutually_exclusive_group()
     fit_group.add_argument("--fit-points", "--fit_points", dest="fit_points", type=int, default=None)
     fit_group.add_argument("--auto-fit-points", "--auto_fit_points", dest="auto_fit_points", action="store_true")
-    ap.add_argument("--auto-fit-tol", "--auto_fit_tol", dest="auto_fit_tol", type=float, default=AUTO_FIT_REL_TOL)
+    ap.add_argument(
+        "--auto-fit-tol", "--auto_fit_tol", dest="auto_fit_tol", type=float,
+        default=AUTO_FIT_REL_TOL,
+        help="Maximum accepted rmse_log for automatic prefix selection (default: 0.05).",
+    )
     ap.add_argument(
         "--auto-fit-err-floor",
         "--auto_fit_err_floor",
@@ -175,7 +197,12 @@ def main() -> None:
             if manifest.empty:
                 raise ValueError(f"Manifest is empty: {args.manifest}")
             for _, row in manifest.iterrows():
-                selected = _selected_from_manifest(master, row, default_row_kind=default_row_kind)
+                selected = _selected_from_manifest(
+                    master,
+                    row,
+                    default_row_kind=default_row_kind,
+                    requested_model=str(args.model),
+                )
                 if selected.empty:
                     print(f"WARNING: no rows matched signal-fit manifest row:\n{row.to_string()}")
                     continue
@@ -220,6 +247,7 @@ def main() -> None:
         Path(args.out_root),
         b_axis=str(args.b_axis),
         ycol=str(args.ycol),
+        model=str(args.model),
     )
     if params_path is not None:
         print("OK fit_params:", params_path)

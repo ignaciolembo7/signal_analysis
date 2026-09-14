@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -16,6 +17,7 @@ from plotting.core import (
 
 
 SIGNAL_KEYS = ["subj", "roi", "N", "td_ms", "direction", "b_step"]
+DEFAULT_PLOT_N_VALUES = (1.0, 4.0, 8.0, 12.0)
 
 
 def load_long_parquet(path: str | Path) -> pd.DataFrame:
@@ -27,6 +29,18 @@ def compute_gradient_axis(values: pd.Series, *, xcol: str) -> np.ndarray:
     return pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
 
 
+def filter_plot_n_values(
+    df: pd.DataFrame,
+    allowed: Sequence[float] = DEFAULT_PLOT_N_VALUES,
+) -> pd.DataFrame:
+    """Keep only the explicitly supported OGSE oscillation counts."""
+    n_numeric = pd.to_numeric(df["N"], errors="coerce").to_numpy(dtype=float)
+    keep = np.zeros(len(df), dtype=bool)
+    for n_value in allowed:
+        keep |= np.isclose(n_numeric, float(n_value), atol=1e-6)
+    return df.loc[keep].copy()
+
+
 def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd.DataFrame:
     avg = df[df["stat"].astype(str) == str(stat)].copy()
     std = df[df["stat"].astype(str) == "std"].copy()
@@ -34,7 +48,10 @@ def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd
     if avg.empty:
         raise ValueError(f"No rows with stat={stat!r} were found in the input table.")
 
-    avg = avg[SIGNAL_KEYS + [xcol, ycol]].rename(columns={ycol: "y_mean", xcol: "x_raw"})
+    avg_cols = SIGNAL_KEYS + [xcol, ycol]
+    if ycol == "value_norm" and "S0" in avg.columns:
+        avg_cols.append("S0")
+    avg = avg[avg_cols].rename(columns={ycol: "y_mean", xcol: "x_raw"})
     if std.empty:
         avg["y_std"] = np.nan
         merged = avg
@@ -44,6 +61,10 @@ def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd
 
     merged["y_mean"] = pd.to_numeric(merged["y_mean"], errors="coerce")
     merged["y_std"] = pd.to_numeric(merged["y_std"], errors="coerce")
+    if ycol == "value_norm" and "S0" in merged.columns:
+        s0 = pd.to_numeric(merged["S0"], errors="coerce")
+        with np.errstate(divide="ignore", invalid="ignore"):
+            merged["y_std"] = merged["y_std"] / s0
     return merged.sort_values(["subj", "roi", "N", "direction", "td_ms", "b_step"], kind="stable")
 
 

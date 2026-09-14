@@ -84,15 +84,14 @@ def main() -> None:
         '--avg-N',
         nargs='*',
         type=int,
-        default=None,
+        default=[1, 4, 8],
         metavar='N',
         help=(
             'Average D0_monoexp across N values (in addition to directions) when '
             'computing the correction factor. '
             'No values: average over ALL N values. '
-            'Specific values: average only over those N (e.g. --avg-N 4 8). '
-            'Omit entirely (default): no averaging over N, one D0_monoexp per '
-            '(subj, sheet, roi, td_ms, N).'
+            'Specific values: average only over those N. '
+            'Default: --avg-N 1 4 8, pooled across long and tra at each td_ms.'
         ),
     )
 
@@ -118,7 +117,7 @@ def main() -> None:
         dest='auto_fit_tol',
         type=float,
         default=0.05,
-        help='Relative rmse_log tolerance for monoexp auto_fit_points (default: 0.05).',
+        help='Maximum accepted rmse_log for monoexp auto_fit_points (default: 0.05).',
     )
     ap.add_argument(
         '--auto-fit-err-floor',
@@ -126,7 +125,7 @@ def main() -> None:
         dest='auto_fit_err_floor',
         type=float,
         default=0.005,
-        help='rmse_log floor used before comparing consecutive k values (default: 0.005).',
+        help='Minimum absolute rmse_log threshold used by auto_fit_points (default: 0.005).',
     )
     ap.add_argument(
         '--auto-fit-min-points',

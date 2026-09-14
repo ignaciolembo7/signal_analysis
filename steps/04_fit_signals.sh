@@ -11,10 +11,14 @@ SIGNAL_FIT_MANIFEST="${SIGNAL_FIT_MANIFEST:-$MANIFEST_DIR/signal_fits.csv}"
 SIGNAL_FIT_MODEL="${SIGNAL_FIT_MODEL:-monoexp}"
 SIGNAL_FIT_YCOL="${SIGNAL_FIT_YCOL:-value_norm}"
 
-case "$TYPE_SEQ" in
-    ogse)  SIGNAL_FIT_B_AXIS="${SIGNAL_FIT_B_AXIS:-${SIGNAL_FIT_G_TYPE:-bvalue_g}}" ;;
-    nogse) SIGNAL_FIT_B_AXIS="${SIGNAL_FIT_B_AXIS:-${SIGNAL_FIT_G_TYPE:-g}}" ;;
-esac
+if [[ "$SIGNAL_FIT_MODEL" == "ogse_free" ]]; then
+    SIGNAL_FIT_B_AXIS="${SIGNAL_FIT_B_AXIS:-${SIGNAL_FIT_G_TYPE:-g}}"
+else
+    case "$TYPE_SEQ" in
+        ogse)  SIGNAL_FIT_B_AXIS="${SIGNAL_FIT_B_AXIS:-${SIGNAL_FIT_G_TYPE:-bvalue_g}}" ;;
+        nogse) SIGNAL_FIT_B_AXIS="${SIGNAL_FIT_B_AXIS:-${SIGNAL_FIT_G_TYPE:-g}}" ;;
+    esac
+fi
 
 SIGNAL_FIT_OUT_ROOT="${SIGNAL_FIT_OUT_ROOT:-$ANALYSIS_ROOT/fits/signal_fit_${SIGNAL_FIT_MODEL}_${SIGNAL_FIT_YCOL}_vs_${SIGNAL_FIT_B_AXIS}}"
 SIGNAL_FIT_PLOT_DIR="${SIGNAL_FIT_PLOT_DIR:-$SIGNAL_FIT_OUT_ROOT/plots}"
@@ -32,6 +36,17 @@ else
     echo "         Fitting selected master rows directly. Use MASTER_* selectors or SIGNAL_FIT_EXTRA_ARGS to narrow the run."
 fi
 
+correction_args=()
+case "${SIGNAL_FIT_CORRECTION_MODE:-}" in
+    raw)       correction_args=(--no-grad-corr) ;;
+    corrected) correction_args=(--apply-grad-corr) ;;
+    "") ;;
+    *)
+        echo "ERROR: SIGNAL_FIT_CORRECTION_MODE must be raw or corrected." >&2
+        exit 2
+        ;;
+esac
+
 "$PY" "$FIT_SIGNAL_SCRIPT" \
     --master-parquet "$MASTER_PARQUET" \
     --row-kind "${SIGNAL_FIT_ROW_KIND:-signal_rotated}" \
@@ -41,5 +56,6 @@ fi
     --plot-dir "$SIGNAL_FIT_PLOT_DIR" \
     --ycol "$SIGNAL_FIT_YCOL" \
     --b-axis "$SIGNAL_FIT_B_AXIS" \
+    "${correction_args[@]}" \
     ${SIGNAL_FIT_AUTO_ARGS:-} \
     ${SIGNAL_FIT_EXTRA_ARGS:-}

@@ -36,7 +36,29 @@ class MonoexpFitSignalTests(unittest.TestCase):
         self.assertTrue(result["ok"], result.get("msg"))
         self.assertEqual(result["fit_points"], 4)
         self.assertEqual(result["n_fit"], 4)
-        self.assertIn("Stopped at k=5", result["msg"])
+        self.assertIn("First rejected prefix: k=5", result["msg"])
+
+    def test_auto_fit_points_is_not_anchored_to_an_artificially_perfect_short_prefix(self) -> None:
+        b = np.array([0.0, 100.0, 200.0, 300.0, 400.0, 500.0])
+        y = monoexp(b, 1.0, 0.0023)
+        y[3:5] *= np.array([1.025, 0.975])
+        y[5] = 0.9
+
+        result = select_monoexp_fit_result(
+            b,
+            y,
+            auto_fit_points=True,
+            auto_fit_min_points=3,
+            auto_fit_max_points=6,
+            auto_fit_rel_tol=0.05,
+            auto_fit_err_floor=0.005,
+            fix_M0=1.0,
+            D0_init=0.0023,
+        )
+
+        self.assertTrue(result["ok"], result.get("msg"))
+        self.assertEqual(result["fit_points"], 5)
+        self.assertEqual(result["n_fit"], 5)
 
     def test_fixed_fit_uses_requested_leading_points(self) -> None:
         b = np.array([0.0, 100.0, 200.0, 300.0, 400.0])

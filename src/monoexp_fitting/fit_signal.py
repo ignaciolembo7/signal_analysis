@@ -225,9 +225,11 @@ def select_monoexp_fit_result(
                 "msg": f"Invalid auto_fit_points range: min_k={k_min}, max_k={k_max}.",
             }
 
-        last_ok: dict | None = None
-        stop_msg: str | None = None
+        fallback: dict | None = None
+        accepted: list[dict] = []
+        rejected: list[tuple[int, float]] = []
         tested_until = k_min - 1
+        score_limit = max(float(auto_fit_rel_tol), float(auto_fit_err_floor)) + AUTO_FIT_ABS_TOL
         for k in range(k_min, k_max + 1):
             tested_until = k
             cand = fit_monoexp_prefix(
@@ -240,46 +242,39 @@ def select_monoexp_fit_result(
                 min_valid_points=k_min,
             )
             if not cand["ok"]:
-                if last_ok is None:
-                    continue
-                stop_msg = f"Stopped at k={k} because the fit became invalid: {cand.get('msg', 'invalid fit')}"
-                break
-
-            if last_ok is None:
-                last_ok = cand
                 continue
+            if fallback is None:
+                fallback = cand
+            score = float(cand["rmse_log"])
+            if np.isfinite(score) and score <= score_limit:
+                accepted.append(cand)
+            else:
+                rejected.append((k, score))
 
-            prev_score = float(last_ok["rmse_log"])
-            curr_score = float(cand["rmse_log"])
-            effective_prev_score = max(prev_score, float(auto_fit_err_floor))
-            allowed_score = effective_prev_score * (1.0 + float(auto_fit_rel_tol)) + AUTO_FIT_ABS_TOL
-            if curr_score <= allowed_score:
-                last_ok = cand
-                continue
-
-            stop_msg = (
-                f"Stopped at k={k}: rmse_log={curr_score:.4g} exceeded "
-                f"allowed={allowed_score:.4g} from previous k={int(last_ok['fit_points'])} "
-                f"(prev={prev_score:.4g}, floor={float(auto_fit_err_floor):.4g}, "
-                f"tol={float(auto_fit_rel_tol):.2%})."
-            )
-            break
-
-        if last_ok is not None:
-            selected = dict(last_ok)
+        chosen = accepted[-1] if accepted else fallback
+        if chosen is not None:
+            selected = dict(chosen)
             selected["fit_strategy"] = "auto"
             selected["auto_fit_metric"] = "rmse_log"
             selected["auto_fit_score"] = float(selected["rmse_log"])
-            if stop_msg is None:
-                stop_msg = f"Reached max k={tested_until} within tolerance (tol={float(auto_fit_rel_tol):.2%})."
+            rejection_summary = ""
+            if rejected:
+                first_k, first_score = rejected[0]
+                rejection_summary = (
+                    f" First rejected prefix: k={first_k}, rmse_log={first_score:.4g}."
+                )
+            fallback_summary = ""
+            if not accepted:
+                fallback_summary = " No prefix met the threshold; retained the smallest valid prefix."
             selected["msg"] = (
                 f"Auto fit_points selected {int(selected['fit_points'])} "
-                f"after testing k={k_min}..{tested_until}. {stop_msg}"
+                f"after testing every prefix k={k_min}..{tested_until} with "
+                f"rmse_log <= {score_limit:.4g}.{rejection_summary}{fallback_summary}"
             )
             selected["method"] = (
                 f"{selected['method']} | "
-                f"auto_fit_points_sequential(rmse_log, tol={float(auto_fit_rel_tol):.2%}, "
-                f"err_floor={float(auto_fit_err_floor):.4g}, min_k={k_min}, max_k={k_max})"
+                f"auto_fit_points_largest_prefix(rmse_log_limit={score_limit:.4g}, "
+                f"min_k={k_min}, max_k={k_max})"
             )
             return selected
 
@@ -564,12 +559,20 @@ def fit_signal_monoexp(
     return FitOutputs(fit_params=pd.DataFrame(params_rows), fit_points=pd.DataFrame(point_rows))
 
 
-def write_fit_outputs(outputs: FitOutputs, out_root: Path, *, b_axis: str, ycol: str) -> tuple[Path | None, Path | None]:
+def write_fit_outputs(
+    outputs: FitOutputs,
+    out_root: Path,
+    *,
+    b_axis: str,
+    ycol: str,
+    model: str = "monoexp",
+) -> tuple[Path | None, Path | None]:
     out_root.mkdir(parents=True, exist_ok=True)
     axis_tag = sanitize_output_token(b_axis)
     y_tag = sanitize_output_token(ycol)
-    params_path = out_root / f"signal_fit_params.monoexp.{axis_tag}.{y_tag}.parquet"
-    points_path = out_root / f"signal_fit_points.monoexp.{axis_tag}.{y_tag}.parquet"
+    model_tag = sanitize_output_token(model)
+    params_path = out_root / f"signal_fit_params.{model_tag}.{axis_tag}.{y_tag}.parquet"
+    points_path = out_root / f"signal_fit_points.{model_tag}.{axis_tag}.{y_tag}.parquet"
     written_params: Path | None = None
     written_points: Path | None = None
     if not outputs.fit_params.empty:

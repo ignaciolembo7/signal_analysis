@@ -116,6 +116,15 @@ pipeline_require_file() {
     fi
 }
 
+pipeline_require_dir() {
+    local path="$1"
+    local label="$2"
+    if [[ ! -d "$path" ]]; then
+        echo "ERROR: $label not found: $path" >&2
+        exit 1
+    fi
+}
+
 pipeline_ensure_derivative_description() {
     local derivative_root="$PROJECT_ROOT/Data-BIDS/derivatives/signal_analysis"
     case "$ANALYSIS_ROOT" in
@@ -220,12 +229,18 @@ Available steps:
                      Export the selected master parquet to an Excel workbook.
 
   Plots:
-    plot_signal      Plot signal curves from master.long.parquet.
+    plot_signal              Plot signal curves with explicit environment settings.
+    plot_signal_raw          Plot unrotated, unnormalized signal.
+    plot_signal_norm         Plot unrotated, normalized signal.
+    plot_signal_rotated      Plot rotated, unnormalized signal.
+    plot_signal_rotated_norm Plot rotated, normalized signal.
     plot_monoexp_d   Plot monoexponential D vs td_ms/Delta_app_ms.
 
   Fits:
     fit_signal                 Fit signal curves using signal_fits.csv.
     fit_signal_gradcorr        fit_signal with gradient correction enabled.
+    fit_ogse_free_signal          Fit OGSE signal vs g with M_ogse_free.
+    fit_ogse_free_signal_gradcorr Same OGSE free fit using the corrected gradient axis.
     fit_global_signal          Fit mixed/global signal models directly.
     fit_contrast               Fit contrast rows.
     fit_contrast_free          fit_contrast with free-model defaults.
@@ -562,10 +577,14 @@ Examples:
     bash signal_analysis/run_dataset.sh brain ogse contrast_resampled
 EOF
             ;;
-        plot_signal)
+        plot_signal|plot_signal_raw|plot_signal_norm|plot_signal_rotated|plot_signal_rotated_norm)
             cat <<'EOF'
 Usage:
   bash run_dataset.sh <type_subj> <type_seq> plot_signal
+  bash run_dataset.sh <type_subj> ogse plot_signal_raw
+  bash run_dataset.sh <type_subj> ogse plot_signal_norm
+  bash run_dataset.sh <type_subj> ogse plot_signal_rotated
+  bash run_dataset.sh <type_subj> ogse plot_signal_rotated_norm
 
 What it does:
   Plots signal curves selected from master.long.parquet using the script for TYPE_SEQ.
@@ -582,6 +601,7 @@ Variables for this step:
   PLOT_DIRECTION          Optional direction selector, e.g. long|tra|x|y|z.
   PLOT_TD_MS              Optional td_ms selector.
   PLOT_N                  Optional N selector.
+                          OGSE plots default to N=1,4,8,12 only.
   PLOT_SIGNAL_YCOL        value|value_norm. Default: value_norm
   PLOT_SIGNAL_XCOL        Gradient column (x axis).
                           OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g_thorsten
@@ -600,24 +620,26 @@ Examples:
     bash signal_analysis/run_dataset.sh brain ogse plot_signal
 EOF
             ;;
-        fit_signal|fit_signal_gradcorr)
+        fit_signal|fit_signal_gradcorr|fit_ogse_free_signal|fit_ogse_free_signal_gradcorr)
             cat <<'EOF'
 Usage:
   bash run_dataset.sh <type_subj> <type_seq> fit_signal
   bash run_dataset.sh <type_subj> <type_seq> fit_signal_gradcorr
+  bash run_dataset.sh <type_subj> ogse fit_ogse_free_signal
+  bash run_dataset.sh <type_subj> ogse fit_ogse_free_signal_gradcorr
 
 What it does:
   Fits signal curves selected from master according to manifests/<type_subj>_<type_seq>/signal_fits.csv.
-  Currently this step supports only model=monoexp. Manifest rows may include a
-  "model" column, but non-monoexp values are rejected.
   fit_signal_gradcorr is a preset that adds --apply_grad_corr to every fit automatically.
+  fit_ogse_free_signal fits OGSE signal vs g with M_ogse_free; its gradcorr preset
+  first scales g using the gradient-correction factor stored in the master table.
 
 Variables for this step:
   MASTER_PARQUET          Input master table.
   FIT_SIGNAL_SCRIPT       Python script override.
   SIGNAL_FIT_MANIFEST     CSV signal-fit manifest.
   SIGNAL_FIT_OUT_ROOT     Output root. Default: $ANALYSIS_ROOT/fits/signal_fit_<model>_<ycol>_vs_<axis>
-  SIGNAL_FIT_MODEL        monoexp only for now. Default: monoexp
+  SIGNAL_FIT_MODEL        monoexp|ogse_free. Default: monoexp
   SIGNAL_FIT_B_AXIS       B-value/gradient axis for monoexp fitting.
                           OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: bvalue_g
                           NOGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
@@ -648,10 +670,10 @@ Useful SIGNAL_FIT_EXTRA_ARGS:
       Fixed number of leading b_step points to include in the monoexp fit. Default: 6
       if neither --fit_points nor --auto_fit_points is passed.
   --auto_fit_points
-      Automatically keep the largest leading b_step prefix whose rmse_log remains
-      within tolerance when adding points.
-  --auto_fit_tol F        Relative tolerance for --auto_fit_points. Default: 0.05.
-  --auto_fit_err_floor F  Absolute RMSE floor before comparing k values. Default: 0.005.
+      Test every leading b_step prefix and keep the largest one whose rmse_log is
+      below the absolute acceptance threshold.
+  --auto_fit_tol F        Maximum accepted rmse_log. Default: 0.05.
+  --auto_fit_err_floor F  Minimum absolute acceptance threshold. Default: 0.005.
   --auto_fit_min_points N First k tested by --auto_fit_points. Default: 3.
   --auto_fit_max_points N Last k tested by --auto_fit_points. Default: 9.
 
@@ -693,6 +715,8 @@ What it does:
     correction_factor = sqrt(D0_nogse / D0_monoexp_avg)
 
   The monoexp D0 uses auto_fit_points by default in this step.
+  Its reference value is averaged at each td_ms over directions long/tra and
+  N=1,4,8 by default.
 
 Variables for this step:
   MASTER_PARQUET             Input/output master table.
@@ -1203,8 +1227,8 @@ pipeline_step_script() {
         filter_master_points) echo "$TEMPLATE_ROOT/steps/00_filter_master_points.sh" ;;
         export_master_xlsx) echo "$TEMPLATE_ROOT/steps/99_export_master_xlsx.sh" ;;
         rotate) echo "$TEMPLATE_ROOT/steps/02_rotate_signals.sh" ;;
-        plot_signal) echo "$TEMPLATE_ROOT/steps/03_plot_signals.sh" ;;
-        fit_signal|fit_signal_gradcorr) echo "$TEMPLATE_ROOT/steps/04_fit_signals.sh" ;;
+        plot_signal|plot_signal_raw|plot_signal_norm|plot_signal_rotated|plot_signal_rotated_norm) echo "$TEMPLATE_ROOT/steps/03_plot_signals.sh" ;;
+        fit_signal|fit_signal_gradcorr|fit_ogse_free_signal|fit_ogse_free_signal_gradcorr) echo "$TEMPLATE_ROOT/steps/04_fit_signals.sh" ;;
         fit_global_signal) echo "$TEMPLATE_ROOT/steps/04_fit_signals_global.sh" ;;
         grad_correction) echo "$TEMPLATE_ROOT/steps/05_make_grad_correction.sh" ;;
         alpha) echo "$TEMPLATE_ROOT/steps/06_alpha_macro.sh" ;;
@@ -1220,18 +1244,79 @@ pipeline_step_script() {
 
 pipeline_prepare_step_env() {
     case "$1" in
-        fit_signal_gradcorr)
-            SIGNAL_FIT_MODEL="${SIGNAL_FIT_MODEL:-monoexp}"
-            if [[ "$TYPE_SEQ" == "nogse" ]]; then
-                SIGNAL_FIT_G_TYPE="${SIGNAL_FIT_G_TYPE:-g}"
+        plot_signal_raw)
+            PLOT_ROW_KIND="signal"
+            PLOT_SIGNAL_YCOL="value"
+            export PLOT_ROW_KIND PLOT_SIGNAL_YCOL
+            ;;
+        plot_signal_norm)
+            PLOT_ROW_KIND="signal"
+            PLOT_SIGNAL_YCOL="value_norm"
+            export PLOT_ROW_KIND PLOT_SIGNAL_YCOL
+            ;;
+        plot_signal_rotated)
+            PLOT_ROW_KIND="signal_rotated"
+            PLOT_SIGNAL_YCOL="value"
+            export PLOT_ROW_KIND PLOT_SIGNAL_YCOL
+            ;;
+        plot_signal_rotated_norm)
+            PLOT_ROW_KIND="signal_rotated"
+            PLOT_SIGNAL_YCOL="value_norm"
+            export PLOT_ROW_KIND PLOT_SIGNAL_YCOL
+            ;;
+        fit_ogse_free_signal|fit_ogse_free_signal_gradcorr)
+            if [[ "$TYPE_SEQ" != "ogse" ]]; then
+                echo "ERROR: $1 is only valid for OGSE data." >&2
+                return 2
+            fi
+            SIGNAL_FIT_MODEL="ogse_free"
+            SIGNAL_FIT_G_TYPE="g"
+            SIGNAL_FIT_YCOL="value_norm"
+            SIGNAL_FIT_OUT_ROOT="$ANALYSIS_ROOT/fits/signal_fit_ogse_free_value_norm_vs_g"
+            SIGNAL_FIT_CORRECTION_MODE="raw"
+            if [[ " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --directions "* && " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --direction "* ]]; then
+                SIGNAL_FIT_EXTRA_ARGS="${SIGNAL_FIT_EXTRA_ARGS:-} --directions long tra"
+            fi
+            if [[ "$1" == "fit_ogse_free_signal_gradcorr" ]]; then
+                SIGNAL_FIT_CORRECTION_MODE="corrected"
+                SIGNAL_FIT_OUT_ROOT="$ANALYSIS_ROOT/fits/signal_fit_ogse_free_value_norm_vs_g_gradcorr"
+            fi
+            export SIGNAL_FIT_MODEL SIGNAL_FIT_G_TYPE SIGNAL_FIT_YCOL SIGNAL_FIT_EXTRA_ARGS
+            export SIGNAL_FIT_OUT_ROOT SIGNAL_FIT_CORRECTION_MODE
+            ;;
+        fit_signal)
+            SIGNAL_FIT_MODEL="monoexp"
+            SIGNAL_FIT_YCOL="value_norm"
+            SIGNAL_FIT_CORRECTION_MODE="raw"
+            if [[ "$TYPE_SEQ" == "ogse" ]]; then
+                SIGNAL_FIT_G_TYPE="bvalue_g"
+                SIGNAL_FIT_OUT_ROOT="$ANALYSIS_ROOT/fits/signal_fit_monoexp_value_norm_vs_bvalue_g"
+                if [[ " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --directions "* && " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --direction "* ]]; then
+                    SIGNAL_FIT_EXTRA_ARGS="${SIGNAL_FIT_EXTRA_ARGS:-} --directions long tra"
+                fi
             else
-                SIGNAL_FIT_G_TYPE="${SIGNAL_FIT_G_TYPE:-bvalue_g}"
+                SIGNAL_FIT_G_TYPE="g"
+                SIGNAL_FIT_OUT_ROOT="$ANALYSIS_ROOT/fits/signal_fit_monoexp_value_norm_vs_g"
+            fi
+            export SIGNAL_FIT_MODEL SIGNAL_FIT_G_TYPE SIGNAL_FIT_YCOL SIGNAL_FIT_EXTRA_ARGS
+            export SIGNAL_FIT_OUT_ROOT SIGNAL_FIT_CORRECTION_MODE
+            ;;
+        fit_signal_gradcorr)
+            SIGNAL_FIT_MODEL="monoexp"
+            SIGNAL_FIT_YCOL="value_norm"
+            SIGNAL_FIT_CORRECTION_MODE="corrected"
+            if [[ "$TYPE_SEQ" == "nogse" ]]; then
+                SIGNAL_FIT_G_TYPE="g"
+                SIGNAL_FIT_OUT_ROOT="$ANALYSIS_ROOT/fits/signal_fit_monoexp_value_norm_vs_g_gradcorr"
+            else
+                SIGNAL_FIT_G_TYPE="bvalue_g"
+                SIGNAL_FIT_OUT_ROOT="$ANALYSIS_ROOT/fits/signal_fit_monoexp_value_norm_vs_bvalue_g_gradcorr"
                 if [[ " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --directions "* && " ${SIGNAL_FIT_EXTRA_ARGS:-} " != *" --direction "* ]]; then
                     SIGNAL_FIT_EXTRA_ARGS="${SIGNAL_FIT_EXTRA_ARGS:-} --directions long tra"
                 fi
             fi
-            SIGNAL_FIT_EXTRA_ARGS="${SIGNAL_FIT_EXTRA_ARGS:-} --apply_grad_corr"
-            export SIGNAL_FIT_MODEL SIGNAL_FIT_G_TYPE SIGNAL_FIT_EXTRA_ARGS
+            export SIGNAL_FIT_MODEL SIGNAL_FIT_G_TYPE SIGNAL_FIT_YCOL SIGNAL_FIT_EXTRA_ARGS
+            export SIGNAL_FIT_OUT_ROOT SIGNAL_FIT_CORRECTION_MODE
             ;;
         fit_contrast_free)
             if [[ "$TYPE_SEQ" == "nogse" ]]; then

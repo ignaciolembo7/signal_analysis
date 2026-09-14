@@ -44,6 +44,7 @@ def main() -> None:
     ap.add_argument("--xcol", default="g")
     ap.add_argument("--ycol", default="value_norm")
     ap.add_argument("--stat", default="avg")
+    ap.add_argument("--flat-output", action="store_true", help="Write plots directly under --out_root.")
     ap.add_argument("--rois", nargs="*", default=None)
     ap.add_argument("--directions", nargs="*", default=None)
     args = ap.parse_args()
@@ -68,7 +69,7 @@ def main() -> None:
     out_paths = plot_nogse_signal_table(
         df,
         out_root=args.out_root,
-        analysis_id=analysis_id,
+        analysis_id="" if args.flat_output else analysis_id,
         xcol=str(args.xcol),
         ycol=str(args.ycol),
         stat=str(args.stat),

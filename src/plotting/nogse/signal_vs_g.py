@@ -326,7 +326,7 @@ def plot_nogse_signal_table(
     if directions is not None:
         work = work[work["direction"].astype(str).isin(directions)].copy()
 
-    out_dir = out_root / analysis_id
+    out_dir = out_root / analysis_id if analysis_id else out_root
     ensure_dir(out_dir)
 
     merged = _prepare_avg_std(work, xcol=xcol, ycol=ycol, stat=stat)

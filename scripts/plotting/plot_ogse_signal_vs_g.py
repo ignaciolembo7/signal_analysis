@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from data_processing.master_table import build_analysis_id_from_columns, load_master_table, select_plot_signal, split_selector_values
-from plotting.ogse.signal_vs_g import plot_ogse_signal_summary
+from plotting.ogse.signal_vs_g import filter_plot_n_values, plot_ogse_signal_summary
 
 
 def _master_selectors(args: argparse.Namespace) -> dict[str, object]:
@@ -39,12 +39,20 @@ def main() -> None:
     ap.add_argument("--direction", action="append", default=None)
     ap.add_argument("--td_ms", type=float, default=None)
     ap.add_argument("--N", type=float, default=None)
+    ap.add_argument(
+        "--N-values",
+        nargs="+",
+        type=float,
+        default=[1.0, 4.0, 8.0, 12.0],
+        help="Only plot these N values (default: 1 4 8 12).",
+    )
     ap.add_argument("--Hz", type=float, default=None)
     ap.add_argument("--out_root", "--out_dir", dest="out_root", type=Path, default=Path("plots/ogse_vs_g"))
     ap.add_argument("--ycol", "--y_col", dest="ycol", default="value_norm")
     ap.add_argument("--xcol", default="g_thorsten")
     ap.add_argument("--stat", default="avg")
     ap.add_argument("--no_ylim", action="store_true")
+    ap.add_argument("--flat-output", action="store_true", help="Write plots directly under --out_root.")
     args = ap.parse_args()
 
     master = load_master_table(args.master_parquet)
@@ -53,6 +61,8 @@ def main() -> None:
         rotated=args.row_kind == "signal_rotated",
         **_master_selectors(args),
     )
+    if args.N_values:
+        df = filter_plot_n_values(df, args.N_values)
     if df.empty:
         raise ValueError("No master signal rows matched the requested selectors.")
     try:
@@ -63,7 +73,7 @@ def main() -> None:
         )
     except ValueError:
         exp_id = f"{args.row_kind}_master_selection"
-    out_dir = args.out_root / exp_id
+    out_dir = args.out_root if args.flat_output else args.out_root / exp_id
     ylim = None if args.no_ylim else (0.0, 1.0)
 
     outputs = plot_ogse_signal_summary(

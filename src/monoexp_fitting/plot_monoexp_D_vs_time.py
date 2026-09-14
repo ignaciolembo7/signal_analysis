@@ -57,7 +57,7 @@ def _infer_sheet(path: Path, df: pd.DataFrame) -> str:
     return canonical_sheet_name(path.parent.name) or path.parent.name
 
 
-def discover_fit_param_files(root: str | Path, pattern: str = "**/fit_params*.parquet") -> list[Path]:
+def discover_fit_param_files(root: str | Path, pattern: str = "**/*fit_params*.parquet") -> list[Path]:
     base = Path(root)
     if base.is_file():
         return [base]
@@ -70,7 +70,7 @@ def discover_fit_param_files(root: str | Path, pattern: str = "**/fit_params*.pa
 def load_monoexp_fit_measurements(
     fits_root: str | Path,
     *,
-    pattern: str = "**/fit_params*.parquet",
+    pattern: str = "**/*fit_params*.parquet",
     subjs: Sequence[str] | None = None,
     rois: Sequence[str] | None = None,
     directions: Sequence[str] | None = None,

@@ -4,7 +4,7 @@ import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 os.environ.setdefault('MPLCONFIGDIR', str(Path(tempfile.gettempdir()) / 'matplotlib'))
 
@@ -287,7 +287,7 @@ def make_grad_correction_from_manifest(
     M0_value: float = 1.0,
     D0_init: float = 2.3e-12,
     tol_ms: float = 1e-3,
-    avg_N: list[int] | None = None,
+    avg_N: Sequence[int] | None = (1, 4, 8),
     plot_dir: Path | None = None,
     roi_override: str | None = None,
     monoexp_auto_fit_points: bool = False,
@@ -302,13 +302,12 @@ def make_grad_correction_from_manifest(
 
     correction_factor = sqrt(D0_nogse / D0_monoexp_avg)
 
-    D0_monoexp is always averaged across all directions that share the same
-    (subj, sheet, roi, td_ms, N).
+    D0_monoexp is averaged across the long and tra directions.
 
     avg_N controls additional averaging across N values:
       None  – no N averaging; group key = (subj, sheet, roi, td_ms, N)
       []    – average over ALL N values; group key = (subj, sheet, roi, td_ms)
-      [4,8] – average only over the listed N values (e.g. N=4 and N=8),
+      [1,4,8] – average only over the listed N values (the default),
               still grouped by (subj, sheet, roi, td_ms); the resulting
               D0_monoexp_avg is then applied to every row regardless of its N.
 
@@ -483,6 +482,7 @@ def make_grad_correction_from_manifest(
 
     valid_mono = out['ok_monoexp'] & out['D0_fit_monoexp_m2_ms'].notna()
     source_mono = out.loc[valid_mono]
+    source_mono = source_mono.loc[source_mono['direction'].isin(['long', 'tra'])]
     if N_filter is not None:
         source_mono = source_mono.loc[source_mono['N'].isin(N_filter)]
 

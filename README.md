@@ -361,6 +361,10 @@ GRAD_CORR_EXTRA_ARGS="--avg-N --no-fill-missing" \
 | `filter_master_points` | Create a filtered master table using last-points rules |
 | `rotate` | Rotate signal tensor directions |
 | `plot_signal` | Plot signal curves from the master table |
+| `plot_signal_raw` | Plot unrotated, unnormalized signal curves |
+| `plot_signal_norm` | Plot unrotated, normalized signal curves |
+| `plot_signal_rotated` | Plot rotated, unnormalized signal curves |
+| `plot_signal_rotated_norm` | Plot rotated, normalized signal curves |
 | `fit_signal` | Fit monoexponential signal curves, with `auto_fit_points` by default |
 | `fit_signal_gradcorr` | Same as `fit_signal`, but applies embedded gradient-correction factors |
 | `grad_correction` | Build and embed gradient-correction factors |
@@ -395,18 +399,20 @@ isolated subshell.
 
 ## Quick Start
 
-Run the complete unfiltered brain workflow for the current `erode1`, `plain`,
-and `sket1` extraction variants:
+Run stages directly through the dataset CLI. For example, run the core brain
+analysis for the `plain` extraction variant:
 
 ```bash
-bash repos/signal_analysis/run_brain_variants.sh
+DWI_LEVEL=den_gr-topup ROI_VARIANT=plain \
+  bash repos/signal_analysis/run_dataset.sh brain ogse ingest rotate grad_correction
 ```
 
-The script runs the variants sequentially and writes one log per variant under
-`logs/signal_analysis/`. Override the list when needed:
+Generate the four signal-plot families as explicit stages:
 
 ```bash
-ROI_VARIANTS="plain sket1" bash repos/signal_analysis/run_brain_variants.sh
+DWI_LEVEL=den_gr-topup ROI_VARIANT=plain \
+  bash repos/signal_analysis/run_dataset.sh brain ogse \
+  plot_signal_raw plot_signal_norm plot_signal_rotated plot_signal_rotated_norm
 ```
 
 Brain OGSE, plain CC ROI, topup-corrected DWI:
@@ -951,6 +957,59 @@ any command:
 | `MANIFEST_DIR` | Manifest folder for the current dataset |
 | `MASTER_LAST_POINTS_BY_TD` | Optional td/N last-points filtering rules |
 | `MASTER_LAST_POINTS_PARQUET` | Optional output path for the filtered master table |
+
+## ESMRMB Variant-Comparison Notebook
+
+`notebooks/esmrmb_variant_comparison.ipynb` rebuilds the signal, contrast,
+filtered-length, alpha, and transition-time panels used in the ESMRMB 2026
+analysis. It reads only canonical signal-analysis master tables and their
+`alpha_macro/master/summary_alpha_values.xlsx` files.
+
+The contrast follows `research/analysis_project_balseiro_microstructure.docx`.
+It does not subtract N=8 and N=4 measurements by `b_step`. It first corrects
+each branch's gradient axis and jointly fits the two normalized signals with
+the restricted OGSE signal model. The branch correlation times are independent,
+while the normalized Rician floor parameter `C` is shared within the pair.
+Both fitted signals are then evaluated on one common corrected-gradient grid
+over their observed overlap, and the contrast is defined as
+`M_N8_fit(g) - M_N4_fit(g)`. Peak-gradient transformations therefore use one
+well-defined gradient value.
+
+Use the configuration cell to select `DATASET = 'brains'` or
+`DATASET = 'phantoms'`. The brain profile uses `den_gr-topup`, the corpus
+callosum ROIs, and the brain reference diffusivity. The phantom profile uses
+`raw`, discovers ROIs and directions from the master, and applies the phantom
+reference diffusivity. Variant discovery is automatic, including future
+analysis tags; explicit variant, ROI, direction, DWI-level, and example-panel
+overrides remain available.
+
+Brain and phantom results are exported separately under:
+
+```text
+notebooks/outputs/esmrmb_variant_comparison/<dataset>/<dwi-level>/
+```
+
+The output includes figures plus coverage, fit-QC, subject-level metrics, and
+paired differences relative to the chosen reference variant. Phantom execution
+requires its `master.long.parquet` and alpha-summary files to have been created
+by the pipeline first.
+
+Section 6 also creates an exhaustive signal/contrast gallery by default. It
+exports one two-column panel for every distinct
+`(subject, sheet, ROI, direction, diffusion time)` combination, with one row
+per selected variant:
+
+```text
+06_all_signal_contrast_panels/
+├── manifest.csv
+└── sub-<subject>/sheet-<acquisition>/roi-<ROI>__dir-<direction>__td-<time>ms.png
+```
+
+The manifest records successful and missing/failed variants for every panel.
+The gallery cleanup option removes prior PNGs, its prior manifest, thumbnail
+metadata (`Thumbs.db` or `.DS_Store`), and obsolete empty subdirectories so a
+rerun cannot silently retain figures from an older master-table selection or
+from the former nested ROI/direction layout.
 
 ## Validation
 

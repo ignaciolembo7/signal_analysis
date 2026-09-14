@@ -29,7 +29,7 @@ def main() -> None:
     )
     ap.add_argument("--fits-root", required=True, help="Root folder with monoexp fit_params*.parquet files.")
     ap.add_argument("--out-dir", required=True, help="Output folder for combined tables and PNGs.")
-    ap.add_argument("--pattern", default="**/fit_params*.parquet", help="Relative glob inside fits-root.")
+    ap.add_argument("--pattern", default="**/*fit_params*.parquet", help="Relative glob inside fits-root.")
     ap.add_argument("--subjs", nargs="+", default=None, help="Subjects/phantoms to include.")
     ap.add_argument("--rois", nargs="+", default=None, help="ROIs to include.")
     ap.add_argument("--dirs", nargs="+", default=None, help="Directions to include.")

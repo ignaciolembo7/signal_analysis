@@ -21,13 +21,25 @@ case "$PLOT_ROW_KIND" in
         exit 2
         ;;
 esac
-PLOT_OUT_ROOT="${PLOT_OUT_ROOT:-$ANALYSIS_ROOT/plots-master/signal/$PLOT_ROW_KIND}"
+PLOT_SIGNAL_YCOL="${PLOT_SIGNAL_YCOL:-value_norm}"
+case "$PLOT_ROW_KIND:$PLOT_SIGNAL_YCOL" in
+    signal:value)              PLOT_OUTPUT_LABEL="signal" ;;
+    signal:value_norm)         PLOT_OUTPUT_LABEL="signal_norm" ;;
+    signal_rotated:value)      PLOT_OUTPUT_LABEL="signal_rotated" ;;
+    signal_rotated:value_norm) PLOT_OUTPUT_LABEL="signal_rotated_norm" ;;
+    *)
+        echo "ERROR: PLOT_SIGNAL_YCOL must be value or value_norm, got: $PLOT_SIGNAL_YCOL" >&2
+        exit 2
+        ;;
+esac
+PLOT_OUT_ROOT="${PLOT_OUT_ROOT:-$ANALYSIS_ROOT/plots-master/$PLOT_OUTPUT_LABEL}"
 
 pipeline_require_file "$PLOT_SIGNAL_SCRIPT" "plot signal script"
 pipeline_require_file "$MASTER_PARQUET" "master table"
 mkdir -p "$PLOT_OUT_ROOT"
 
 args=(--master-parquet "$MASTER_PARQUET" --out_root "$PLOT_OUT_ROOT" --row-kind "$PLOT_ROW_KIND")
+args+=(--flat-output)
 [[ "${PLOT_SUBJ:-ALL}" != "ALL" ]] && args+=(--subj "$PLOT_SUBJ")
 [[ "${PLOT_SHEET:-ALL}" != "ALL" ]] && args+=(--sheet "$PLOT_SHEET")
 [[ "${PLOT_ROI:-ALL}" != "ALL" ]] && args+=(--roi "$PLOT_ROI")
@@ -37,7 +49,7 @@ args=(--master-parquet "$MASTER_PARQUET" --out_root "$PLOT_OUT_ROOT" --row-kind 
 
 "$PY" "$PLOT_SIGNAL_SCRIPT" \
     "${args[@]}" \
-    --ycol "${PLOT_SIGNAL_YCOL:-value_norm}" \
+    --ycol "$PLOT_SIGNAL_YCOL" \
     --xcol "${PLOT_SIGNAL_XCOL:-${PLOT_SIGNAL_G_TYPE:-$DEFAULT_PLOT_SIGNAL_XCOL}}" \
     --stat "${PLOT_STAT:-avg}" \
     ${PLOT_SIGNAL_EXTRA_ARGS:-}
