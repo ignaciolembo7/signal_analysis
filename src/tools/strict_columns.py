@@ -18,7 +18,7 @@ SUFFIXED_UNRECOGNIZED_COLUMN_BASES = {
     "bvalue_gthorsten",
 }
 
-CANONICAL_COLUMN_HINT = "Use canonical names such as 'direction', 'value_norm', and 'g_thorsten'."
+CANONICAL_COLUMN_HINT = "Use canonical names such as 'direction', 'value_norm', 'g', and 'bvalue_g'."
 
 
 def find_unrecognized_column_names(columns: Iterable[str]) -> list[str]:

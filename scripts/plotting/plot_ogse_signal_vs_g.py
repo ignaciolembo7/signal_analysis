@@ -49,7 +49,7 @@ def main() -> None:
     ap.add_argument("--Hz", type=float, default=None)
     ap.add_argument("--out_root", "--out_dir", dest="out_root", type=Path, default=Path("plots/ogse_vs_g"))
     ap.add_argument("--ycol", "--y_col", dest="ycol", default="value_norm")
-    ap.add_argument("--xcol", default="g_thorsten")
+    ap.add_argument("--xcol", default="g")
     ap.add_argument("--stat", default="avg")
     ap.add_argument("--no_ylim", action="store_true")
     ap.add_argument("--flat-output", action="store_true", help="Write plots directly under --out_root.")

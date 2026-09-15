@@ -19,13 +19,72 @@ from presentation_analysis.abstract_figures import (  # noqa: E402
     build_contrast_table,
     build_resampled_contrasts,
     discover_analysis_runs,
+    export_all_contrast_lcf_panels,
     export_all_signal_contrast_panels,
     fit_tc_pseudohuber,
+    load_alpha_summaries,
+    normalize_alpha_to_internal_reference,
+    summarize_contrast_shape,
 )
 from models.model_fitting import M_ogse_rest_offset  # noqa: E402
 
 
 class AbstractFigureAnalysisTests(unittest.TestCase):
+    def test_alpha_loader_harmonizes_reference_and_prefers_direct_direction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            alpha_path = Path(temporary_directory) / "summary.xlsx"
+            pd.DataFrame(
+                {
+                    "subj": ["P1", "P1"],
+                    "sheet": ["S1", "S1"],
+                    "roi": ["fiber1", "fiber1"],
+                    "direction": ["long", "long"],
+                    "direction_kind": ["raw", "derived"],
+                    "D0_mean_mm2_s": [0.0010, 0.00115],
+                    "D0_std_mm2_s": [0.0001, 0.0001],
+                    "alpha_macro": [0.3125, 0.359375],
+                    "alpha_macro_error": [0.01, 0.01],
+                }
+            ).to_excel(alpha_path, index=False)
+            runs = pd.DataFrame(
+                {
+                    "variant": ["manual"],
+                    "dataset": ["phantoms"],
+                    "alpha_path": [alpha_path],
+                }
+            )
+
+            loaded = load_alpha_summaries(
+                runs,
+                reference_d0_m2_ms=2.3e-12,
+            )
+
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded.iloc[0]["direction_kind"], "raw")
+        self.assertAlmostEqual(float(loaded.iloc[0]["alpha_macro"]), 0.0010 / 0.0023)
+        self.assertTrue(bool(loaded.iloc[0]["alpha_reference_harmonized"]))
+
+    def test_internal_alpha_normalizes_against_same_scan_water(self) -> None:
+        table = pd.DataFrame(
+            {
+                "variant": ["manual"] * 3,
+                "subj": ["P1"] * 3,
+                "sheet": ["S1"] * 3,
+                "roi": ["fiber1", "water1", "water2"],
+                "direction": ["tra"] * 3,
+                "D0_mean_mm2_s": [0.0009, 0.0018, 0.0020],
+                "D0_std_mm2_s": [0.0001, 0.0001, 0.0001],
+            }
+        )
+
+        normalized = normalize_alpha_to_internal_reference(
+            table, reference_rois=["water1", "water2"]
+        )
+
+        fiber = normalized[normalized["roi"].eq("fiber1")].iloc[0]
+        self.assertAlmostEqual(float(fiber["internal_reference_D0_mm2_s"]), 0.0019)
+        self.assertAlmostEqual(float(fiber["alpha_internal"]), 0.0009 / 0.0019)
+
     def test_discovery_finds_future_variant_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -88,7 +147,8 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
                         "sequence": n_value,
                         "source_file": f"n{n_value}.xlsx",
                         "value_norm": values[n_value],
-                        "g_thorsten": float(n_value),
+                        "g": float(n_value),
+                        "g_thorsten": float(n_value) * 100.0,
                         "grad_correction_factor": 0.5,
                         "delta_ms": 10.0,
                         "Delta_app_ms": 9.0,
@@ -153,7 +213,8 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
                         "N": n_value,
                         "source_file": f"n{n_value}.xlsx",
                         "value_norm": signal,
-                        "g_thorsten": gradient,
+                        "g": gradient,
+                        "g_thorsten": gradient * 10.0,
                         "grad_correction_factor": 1.0,
                     }
                 )
@@ -212,6 +273,92 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
             self.assertTrue(figure_path.is_file())
             self.assertTrue((output_dir / "manifest.csv").is_file())
             self.assertFalse((output_dir / "sub-old").exists())
+
+            lcf_output_dir = Path(temporary_directory) / "all_lcf_panels"
+            stale_directory = lcf_output_dir / "sub-old"
+            stale_directory.mkdir(parents=True)
+            (stale_directory / "old.png").touch()
+            tc_data = summary.loc[:, ["variant", "subj", "roi", "direction", "td_ms", "tc_peak_ms"]].copy()
+            tc_summary = pd.DataFrame(
+                columns=["variant", "subj", "roi", "direction", "ok", "c_ms", "delta_ms", "alpha_macro"]
+            )
+            lcf_manifest = export_all_contrast_lcf_panels(
+                contrast,
+                batch_summary,
+                tc_data,
+                tc_summary,
+                variants=["manual", "future-method"],
+                directions=["long"],
+                output_dir=lcf_output_dir,
+                dpi=72,
+                progress_every=0,
+            )
+            lcf_figure_path = lcf_output_dir / lcf_manifest.iloc[0]["figure_path"]
+            self.assertEqual(len(lcf_manifest), 1)
+            self.assertEqual(lcf_manifest.iloc[0]["observed_directions"], "long")
+            self.assertEqual(
+                Path(lcf_manifest.iloc[0]["figure_path"]).parts,
+                ("sub-P1", "roi-fiber1__contrast-vs-filtered-length.png"),
+            )
+            self.assertTrue(lcf_figure_path.is_file())
+            self.assertTrue((lcf_output_dir / "manifest.csv").is_file())
+            self.assertFalse((lcf_output_dir / "sub-old").exists())
+
+    def test_shared_tc_mode_uses_one_physical_correlation_time(self) -> None:
+        td_ms = 120.0
+        d0_m2_ms = 2.3e-12
+        expected_tc_ms = 7.0
+        rows = []
+        for n_value, maximum_gradient in [(8, 70.0), (4, 55.0)]:
+            gradients = np.linspace(0.0, maximum_gradient, 10)
+            signals = M_ogse_rest_offset(
+                td_ms,
+                gradients,
+                n_value,
+                td_ms / n_value,
+                expected_tc_ms,
+                1.0,
+                d0_m2_ms,
+                0.15,
+            )
+            for b_step, (gradient, signal) in enumerate(zip(gradients, signals)):
+                rows.append(
+                    {
+                        "variant": "manual",
+                        "row_kind": "signal_rotated",
+                        "subj": "P1",
+                        "sheet": "sheet1",
+                        "roi": "fiber1",
+                        "direction": "tra",
+                        "stat": "avg",
+                        "td_ms": td_ms,
+                        "b_step": b_step,
+                        "N": n_value,
+                        "source_file": f"n{n_value}.xlsx",
+                        "value_norm": signal,
+                        "g": gradient,
+                        "g_thorsten": gradient * 10.0,
+                        "grad_correction_factor": 1.0,
+                    }
+                )
+
+        contrast, summary = build_resampled_contrasts(
+            pd.DataFrame(rows),
+            d0_m2_ms=d0_m2_ms,
+            directions=["tra"],
+            rois=["fiber1"],
+            grid_size=128,
+            tc_mode="shared",
+        )
+        shape = summarize_contrast_shape(contrast)
+
+        self.assertEqual(summary.iloc[0]["tc_model"], "shared")
+        self.assertEqual(int(summary.iloc[0]["n_parameters"]), 2)
+        self.assertAlmostEqual(float(summary.iloc[0]["tc_shared_ms"]), expected_tc_ms, places=4)
+        self.assertAlmostEqual(float(summary.iloc[0]["tc_high_ms"]), float(summary.iloc[0]["tc_low_ms"]))
+        self.assertTrue(bool(shape.iloc[0]["shape_ok"]))
+        self.assertGreater(float(shape.iloc[0]["contrast_auc_normalized_g"]), 0.0)
+        self.assertGreater(float(shape.iloc[0]["lcf_centroid_um"]), 0.0)
 
     def test_pseudohuber_recovers_delta_with_fixed_alpha(self) -> None:
         td = np.array([90.0, 120.0, 143.4, 210.0])

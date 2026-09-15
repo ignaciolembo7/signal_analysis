@@ -282,7 +282,15 @@ def main() -> None:
     )
     ap.add_argument("--reference-D0", type=float, default=0.0032, help="Reference value used for alpha_macro.")
     ap.add_argument("--reference-D0-error", type=float, default=0.0000283512, help="Reference value error.")
-    ap.add_argument("--direction-alias", action="append", default=None, help="Alias raw=grouped. Repeatable. Default: x=long, y=tra, z=tra.")
+    ap.add_argument(
+        "--direction-alias",
+        action="append",
+        default=None,
+        help=(
+            "Optional legacy alias raw=grouped. Repeatable. No aliases are applied by default; "
+            "modern masters already contain direct long/tra rows."
+        ),
+    )
     ap.add_argument("--out-summary", type=Path, default=Path("plots/summary_alpha_values.xlsx"), help="Output summary_alpha_values.xlsx")
     ap.add_argument(
         "--out-avg",

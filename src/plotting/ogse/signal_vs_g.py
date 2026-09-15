@@ -162,7 +162,7 @@ def plot_ogse_signal_summary(
     df: pd.DataFrame,
     out_dir: str | Path,
     *,
-    xcol: str = "g_thorsten",
+    xcol: str = "g",
     ycol: str = "value_norm",
     stat: str = "avg",
     ylim: tuple[float, float] | None = (0.0, 1.0),

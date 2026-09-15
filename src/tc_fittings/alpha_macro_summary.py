@@ -14,7 +14,7 @@ from tools.brain_labels import infer_subj_label
 
 DEFAULT_CC_REGIONS = ["PostCC", "MidPostCC", "CentralCC", "MidAntCC", "AntCC"]
 DEFAULT_LATERAL_VENTRICLES = ["Left-Lateral-Ventricle", "Right-Lateral-Ventricle"]
-DEFAULT_DIRECTION_ALIASES = {"x": "long", "y": "tra", "z": "tra"}
+DEFAULT_DIRECTION_ALIASES: dict[str, str] = {}
 DEFAULT_SUBJ_COLORS = {"BRAIN": "#377eb8", "LUDG": "#ff7f00", "MBBL": "#4daf4a"}
 REQUIRED_DPROJ_COLUMNS = {"roi", "direction", "bvalue", "D_proj"}
 
@@ -116,7 +116,7 @@ def discover_dproj_files(root: str | Path, pattern: str = "**/*.Dproj.long.parqu
 
 
 def parse_direction_aliases(items: Sequence[str] | None) -> dict[str, str]:
-    aliases = dict(DEFAULT_DIRECTION_ALIASES)
+    aliases: dict[str, str] = {}
     if not items:
         return aliases
     for raw in items:
@@ -495,8 +495,12 @@ def compute_alpha_macro_summary(
     if df_summary.empty:
         raise ValueError("Could not build alpha_macro: there were no valid groups.")
 
-    aliases = direction_aliases or dict(DEFAULT_DIRECTION_ALIASES)
-    df_summary = _expand_direction_alias_rows(df_summary, aliases)
+    # Modern signal-analysis masters already contain the dataset-specific
+    # rotated directions. Preserve those direct long/tra rows instead of
+    # reconstructing them from x/y/z. Aliases remain an explicit legacy-only
+    # option for external tables that do not contain rotated directions.
+    if direction_aliases:
+        df_summary = _expand_direction_alias_rows(df_summary, direction_aliases)
     df_summary["region"] = df_summary["roi"]
     df_summary["direccion"] = df_summary["direction"]
     return df_avg.copy(), df_summary.sort_values(["subj", "roi", "direction"], kind="stable").reset_index(drop=True)

@@ -137,8 +137,22 @@ def load_masters(runs: pd.DataFrame, variants: Sequence[str] | None = None) -> p
     return pd.concat(frames, ignore_index=True)
 
 
-def load_alpha_summaries(runs: pd.DataFrame, variants: Sequence[str] | None = None) -> pd.DataFrame:
-    """Load the alpha-macro summary associated with each selected master."""
+def load_alpha_summaries(
+    runs: pd.DataFrame,
+    variants: Sequence[str] | None = None,
+    *,
+    reference_d0_m2_ms: float | None = None,
+    reference_d0_error_m2_ms: float | None = None,
+    prefer_derived_aliases: bool = False,
+) -> pd.DataFrame:
+    """Load alpha summaries, optionally harmonizing their reference diffusivity.
+
+    ``long`` and ``tra`` can occur as both direct and reconstructed rows in
+    historical workbooks. When both exist for the same logical key, the direct
+    row is retained by default instead of averaging two definitions. Set
+    ``prefer_derived_aliases=True`` only for legacy workbooks that lack valid
+    direct rotated directions.
+    """
 
     selected = _select_runs(runs, variants)
     frames: list[pd.DataFrame] = []
@@ -166,6 +180,45 @@ def load_alpha_summaries(runs: pd.DataFrame, variants: Sequence[str] | None = No
         if "alpha_macro_error" not in frame.columns:
             frame["alpha_macro_error"] = np.nan
         frame["alpha_macro_error"] = pd.to_numeric(frame["alpha_macro_error"], errors="coerce")
+        if reference_d0_m2_ms is not None:
+            if "D0_mean_mm2_s" not in frame.columns:
+                raise KeyError(
+                    f"{alpha_path} cannot be harmonized because D0_mean_mm2_s is missing"
+                )
+            reference_mm2_s = float(reference_d0_m2_ms) * 1e9
+            if reference_mm2_s <= 0:
+                raise ValueError("reference_d0_m2_ms must be positive")
+            d_mean = pd.to_numeric(frame["D0_mean_mm2_s"], errors="coerce")
+            d_error = pd.to_numeric(frame.get("D0_std_mm2_s", np.nan), errors="coerce")
+            frame["alpha_macro"] = d_mean / reference_mm2_s
+            relative_measurement = d_error / d_mean
+            if reference_d0_error_m2_ms is None:
+                relative_reference = 0.0
+            else:
+                relative_reference = float(reference_d0_error_m2_ms) / float(reference_d0_m2_ms)
+            frame["alpha_macro_error"] = frame["alpha_macro"] * np.sqrt(
+                relative_measurement**2 + relative_reference**2
+            )
+            frame["reference_D0_mm2_s"] = reference_mm2_s
+            frame["reference_D0_error_mm2_s"] = (
+                np.nan
+                if reference_d0_error_m2_ms is None
+                else float(reference_d0_error_m2_ms) * 1e9
+            )
+            frame["alpha_reference_harmonized"] = True
+        else:
+            frame["alpha_reference_harmonized"] = False
+        if "direction_kind" in frame.columns:
+            logical_keys = ["subj", "sheet", "roi", "direction"]
+            is_derived = frame["direction_kind"].astype(str).eq("derived")
+            frame["_direction_rank"] = is_derived.astype(int)
+            if not prefer_derived_aliases:
+                frame["_direction_rank"] = (~is_derived).astype(int)
+            frame = (
+                frame.sort_values("_direction_rank", ascending=False, kind="stable")
+                .drop_duplicates(logical_keys, keep="first")
+                .drop(columns="_direction_rank")
+            )
         frames.append(frame)
     return pd.concat(frames, ignore_index=True)
 
@@ -249,7 +302,7 @@ def build_contrast_table(
     directions: Sequence[str] = DEFAULT_DIRECTIONS,
     rois: Sequence[str] | None = CC_ROIS,
     value_column: str = "value_norm",
-    gradient_column: str = "g_thorsten",
+    gradient_column: str = "g",
     apply_gradient_correction: bool = True,
 ) -> pd.DataFrame:
     """Build a direct b-step-paired contrast for diagnostic auditing only.
@@ -358,18 +411,20 @@ def build_resampled_contrasts(
     directions: Sequence[str] = DEFAULT_DIRECTIONS,
     rois: Sequence[str] | None = CC_ROIS,
     value_column: str = "value_norm",
-    gradient_column: str = "g_thorsten",
+    gradient_column: str = "g",
     apply_gradient_correction: bool = True,
     tc_bounds_ms: tuple[float, float] = (0.1, 10000.0),
     rician_c_bounds: tuple[float, float] = (0.0, 2.0),
     grid_size: int = 1000,
+    tc_mode: str = "separate",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Fit paired OGSE signals and resample their difference on one gradient grid.
 
-    The two branches are not subtracted by acquisition index. Each branch has
-    its own restricted-model correlation time, while the normalized Rician
-    floor ``C`` is shared by the N-high/N-low pair. Both fitted signals are
-    then evaluated on the overlap of their corrected gradient ranges.
+    The two branches are not subtracted by acquisition index. ``tc_mode`` may
+    be ``"separate"`` (the historical, flexible construction) or ``"shared"``
+    (one physically common effective correlation time for both encodings).
+    The normalized Rician floor ``C`` is shared in both cases. Both fitted
+    signals are evaluated on the overlap of their corrected gradient ranges.
     """
 
     required = [
@@ -401,6 +456,8 @@ def build_resampled_contrasts(
         raise ValueError("No rotated mean-signal rows match the requested resampled-contrast configuration")
     if int(grid_size) < 32:
         raise ValueError("grid_size must be at least 32")
+    if tc_mode not in {"separate", "shared"}:
+        raise ValueError("tc_mode must be 'separate' or 'shared'")
 
     group_columns = ["variant", "subj", "sheet", "roi", "direction", "td_ms"]
     fit_rows: list[dict[str, object]] = []
@@ -411,9 +468,11 @@ def build_resampled_contrasts(
         low = group[pd.to_numeric(group["N"], errors="coerce").eq(int(n_low))].copy()
         fit_row: dict[str, object] = {
             **metadata,
+            "gradient_column": str(gradient_column),
             "N_high": int(n_high),
             "N_low": int(n_low),
             "D0_m2_ms": float(d0_m2_ms),
+            "tc_model": tc_mode,
             "M0": 1.0,
             "n_points_high": 0,
             "n_points_low": 0,
@@ -466,10 +525,14 @@ def build_resampled_contrasts(
                 dtype=float,
             )
 
-        def residual(parameters: np.ndarray) -> np.ndarray:
+        def unpack_parameters(parameters: np.ndarray) -> tuple[float, float, float]:
             tc_high_ms = float(np.exp(parameters[0]))
-            tc_low_ms = float(np.exp(parameters[1]))
-            c_value = float(parameters[2])
+            if tc_mode == "shared":
+                return tc_high_ms, tc_high_ms, float(parameters[1])
+            return tc_high_ms, float(np.exp(parameters[1])), float(parameters[2])
+
+        def residual(parameters: np.ndarray) -> np.ndarray:
+            tc_high_ms, tc_low_ms, c_value = unpack_parameters(parameters)
             return np.concatenate(
                 [
                     predict(g_high_corr, n_high, tc_high_ms, c_value) - signal_high,
@@ -481,23 +544,47 @@ def build_resampled_contrasts(
         observed_floor = float(np.clip(observed_floor, 0.0, 0.89))
         c_initial = observed_floor / np.sqrt(max(1e-12, 1.0 - observed_floor**2))
         c_initial = float(np.clip(c_initial, rician_c_bounds[0] + 1e-8, rician_c_bounds[1] - 1e-8))
-        lower = np.array([np.log(tc_bounds_ms[0]), np.log(tc_bounds_ms[0]), rician_c_bounds[0]])
-        upper = np.array([np.log(tc_bounds_ms[1]), np.log(tc_bounds_ms[1]), rician_c_bounds[1]])
+        if tc_mode == "shared":
+            initial = np.array([np.log(5.0), c_initial])
+            lower = np.array([np.log(tc_bounds_ms[0]), rician_c_bounds[0]])
+            upper = np.array([np.log(tc_bounds_ms[1]), rician_c_bounds[1]])
+            transforms = ("exp", "identity")
+        else:
+            initial = np.array([np.log(5.0), np.log(5.0), c_initial])
+            lower = np.array([np.log(tc_bounds_ms[0]), np.log(tc_bounds_ms[0]), rician_c_bounds[0]])
+            upper = np.array([np.log(tc_bounds_ms[1]), np.log(tc_bounds_ms[1]), rician_c_bounds[1]])
+            transforms = ("exp", "exp", "identity")
         try:
             result = least_squares(
                 residual,
-                x0=np.array([np.log(5.0), np.log(5.0), c_initial]),
+                x0=initial,
                 bounds=(lower, upper),
                 max_nfev=200000,
             )
-            tc_high_ms = float(np.exp(result.x[0]))
-            tc_low_ms = float(np.exp(result.x[1]))
-            c_value = float(result.x[2])
-            errors = _standard_errors(result, ("exp", "exp", "identity"))
+            tc_high_ms, tc_low_ms, c_value = unpack_parameters(result.x)
+            errors = _standard_errors(result, transforms)
+            if tc_mode == "shared":
+                tc_high_error_ms = tc_low_error_ms = float(errors[0])
+                c_error = float(errors[1])
+            else:
+                tc_high_error_ms = float(errors[0])
+                tc_low_error_ms = float(errors[1])
+                c_error = float(errors[2])
             predicted_high = predict(g_high_corr, n_high, tc_high_ms, c_value)
             predicted_low = predict(g_low_corr, n_low, tc_low_ms, c_value)
             observed = np.concatenate([signal_high, signal_low])
             predicted = np.concatenate([predicted_high, predicted_low])
+            residual_sum_squares = float(np.sum((observed - predicted) ** 2))
+            n_observations = int(len(observed))
+            n_parameters = int(len(result.x))
+            variance_term = max(residual_sum_squares / n_observations, np.finfo(float).tiny)
+            aic = float(n_observations * np.log(variance_term) + 2 * n_parameters)
+            aicc = (
+                float(aic + 2 * n_parameters * (n_parameters + 1) / (n_observations - n_parameters - 1))
+                if n_observations > n_parameters + 1
+                else np.nan
+            )
+            bic = float(n_observations * np.log(variance_term) + n_parameters * np.log(n_observations))
 
             # Restrict the common grid to the gradient interval supported by
             # both acquisitions; this avoids extrapolation-driven peaks.
@@ -508,6 +595,7 @@ def build_resampled_contrasts(
             contrast = signal_high_fit - signal_low_fit
             peak_index = int(np.nanargmax(contrast))
             g_peak_corr = float(g_resampled[peak_index])
+            peak_fraction = float(g_peak_corr / g_max_corr)
             lcf_peak_um, tc_peak_ms = _derived_peak_axes(td_ms, g_peak_corr, float(d0_m2_ms))
 
             fit_row.update(
@@ -515,18 +603,28 @@ def build_resampled_contrasts(
                     "ok": bool(result.success),
                     "message": str(result.message),
                     "tc_high_ms": tc_high_ms,
-                    "tc_high_error_ms": float(errors[0]),
+                    "tc_high_error_ms": tc_high_error_ms,
                     "tc_low_ms": tc_low_ms,
-                    "tc_low_error_ms": float(errors[1]),
+                    "tc_low_error_ms": tc_low_error_ms,
+                    "tc_shared_ms": tc_high_ms if tc_mode == "shared" else np.nan,
+                    "tc_shared_error_ms": tc_high_error_ms if tc_mode == "shared" else np.nan,
                     "C": c_value,
-                    "C_error": float(errors[2]),
+                    "C_error": c_error,
                     "rician_floor": c_value / np.sqrt(1.0 + c_value**2),
                     "r2_high": _r2(signal_high, predicted_high),
                     "r2_low": _r2(signal_low, predicted_low),
                     "r2": _r2(observed, predicted),
                     "rmse": float(np.sqrt(np.mean((observed - predicted) ** 2))),
+                    "rss": residual_sum_squares,
+                    "n_observations": n_observations,
+                    "n_parameters": n_parameters,
+                    "aic": aic,
+                    "aicc": aicc,
+                    "bic": bic,
                     "g_max_corr_mTm": g_max_corr,
                     "g_peak_corr_mTm": g_peak_corr,
+                    "g_peak_fraction": peak_fraction,
+                    "peak_at_boundary": bool(peak_index in {0, len(g_resampled) - 1}),
                     "signal_peak": float(contrast[peak_index]),
                     "lcf_peak_um": lcf_peak_um,
                     "tc_peak_ms": tc_peak_ms,
@@ -545,6 +643,7 @@ def build_resampled_contrasts(
                         "grid_index": np.arange(len(g_resampled), dtype=int),
                         "N_high": int(n_high),
                         "N_low": int(n_low),
+                        "gradient_column": str(gradient_column),
                         "g_resampled_corr": g_resampled,
                         "g_high_corr": g_resampled,
                         "g_low_corr": g_resampled,
@@ -566,6 +665,77 @@ def build_resampled_contrasts(
         raise ValueError("No resampled contrasts could be constructed")
     resampled = pd.concat(contrast_frames, ignore_index=True)
     return resampled, fit_summary
+
+
+def summarize_contrast_shape(resampled: pd.DataFrame) -> pd.DataFrame:
+    """Summarize each contrast using the full positive curve, not only its maximum.
+
+    The normalized-gradient metrics are protocol-comparable when the two curves
+    cover equivalent encoding ranges. Length metrics integrate in log-length
+    space and therefore describe the location and breadth of the filter response
+    without treating a dense interpolation grid as independent observations.
+    """
+
+    keys = ["variant", "subj", "sheet", "roi", "direction", "td_ms"]
+    _require_columns(
+        resampled,
+        keys + ["g_resampled_corr", "contrast", "lcf_um"],
+        "resampled",
+    )
+    rows: list[dict[str, object]] = []
+    for key, group in resampled.groupby(keys, sort=False, dropna=False):
+        metadata = dict(zip(keys, key))
+        g = pd.to_numeric(group["g_resampled_corr"], errors="coerce").to_numpy(float)
+        y = pd.to_numeric(group["contrast"], errors="coerce").to_numpy(float)
+        lcf = pd.to_numeric(group["lcf_um"], errors="coerce").to_numpy(float)
+        finite = np.isfinite(g) & np.isfinite(y)
+        g, y = g[finite], np.maximum(y[finite], 0.0)
+        if len(g) < 3 or np.nanmax(g) <= 0 or np.nanmax(y) <= 0:
+            rows.append({**metadata, "shape_ok": False, "shape_message": "No positive finite contrast curve"})
+            continue
+        order = np.argsort(g)
+        g, y = g[order], y[order]
+        u = g / float(np.max(g))
+        peak_index = int(np.argmax(y))
+        peak = float(y[peak_index])
+        area_u = float(np.trapezoid(y, u))
+        centroid_u = float(np.trapezoid(u * y, u) / area_u)
+        variance_u = float(np.trapezoid((u - centroid_u) ** 2 * y, u) / area_u)
+
+        length_finite = finite & np.isfinite(lcf) & (lcf > 0)
+        x = np.log(lcf[length_finite])
+        y_length = np.maximum(pd.to_numeric(group["contrast"], errors="coerce").to_numpy(float)[length_finite], 0.0)
+        length_order = np.argsort(x)
+        x, y_length = x[length_order], y_length[length_order]
+        area_log_length = float(np.trapezoid(y_length, x)) if len(x) >= 2 else np.nan
+        if np.isfinite(area_log_length) and area_log_length > 0:
+            centroid_log_length = float(np.trapezoid(x * y_length, x) / area_log_length)
+            variance_log_length = float(
+                np.trapezoid((x - centroid_log_length) ** 2 * y_length, x) / area_log_length
+            )
+            centroid_length = float(np.exp(centroid_log_length))
+            geometric_width = float(np.exp(np.sqrt(max(variance_log_length, 0.0))))
+        else:
+            centroid_length = np.nan
+            geometric_width = np.nan
+        rows.append(
+            {
+                **metadata,
+                "shape_ok": True,
+                "shape_message": "",
+                "contrast_peak": peak,
+                "contrast_auc_normalized_g": area_u,
+                "contrast_equivalent_width_fraction": area_u / peak,
+                "g_peak_fraction": float(u[peak_index]),
+                "g_centroid_fraction": centroid_u,
+                "g_spread_fraction": float(np.sqrt(max(variance_u, 0.0))),
+                "lcf_centroid_um": centroid_length,
+                "lcf_geometric_width": geometric_width,
+                "contrast_auc_log_lcf": area_log_length,
+                "peak_at_boundary": bool(peak_index in {0, len(y) - 1}),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _standard_errors(result, transform: Sequence[str]) -> np.ndarray:
@@ -766,6 +936,59 @@ def aggregate_alpha(alpha: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def normalize_alpha_to_internal_reference(
+    alpha: pd.DataFrame,
+    *,
+    reference_rois: Sequence[str],
+) -> pd.DataFrame:
+    """Normalize projected diffusivity to reference ROIs from the same scan.
+
+    This internal ratio complements (and does not overwrite) ``alpha_macro``.
+    It is useful when temperature or the externally assumed free diffusivity
+    differs between sessions. Reference uncertainty is the between-reference
+    standard error; target uncertainty uses ``D0_std_mm2_s`` when available.
+    """
+
+    keys = ["variant", "subj", "sheet", "direction"]
+    _require_columns(alpha, keys + ["roi", "D0_mean_mm2_s"], "alpha")
+    reference_names = {str(value) for value in reference_rois}
+    if not reference_names:
+        raise ValueError("reference_rois must contain at least one ROI")
+    frame = alpha.copy()
+    frame["D0_mean_mm2_s"] = pd.to_numeric(frame["D0_mean_mm2_s"], errors="coerce")
+    if "D0_std_mm2_s" not in frame.columns:
+        frame["D0_std_mm2_s"] = np.nan
+    frame["D0_std_mm2_s"] = pd.to_numeric(frame["D0_std_mm2_s"], errors="coerce")
+    reference = frame[frame["roi"].astype(str).isin(reference_names)].copy()
+    if reference.empty:
+        raise ValueError(f"No internal-reference rows match {sorted(reference_names)}")
+    lookup = (
+        reference.groupby(keys, as_index=False, dropna=False)["D0_mean_mm2_s"]
+        .agg(["median", "std", "count"])
+        .reset_index()
+        .rename(
+            columns={
+                "median": "internal_reference_D0_mm2_s",
+                "std": "internal_reference_D0_between_roi_std_mm2_s",
+                "count": "internal_reference_n_rois",
+            }
+        )
+    )
+    lookup["internal_reference_D0_sem_mm2_s"] = (
+        lookup["internal_reference_D0_between_roi_std_mm2_s"]
+        / np.sqrt(lookup["internal_reference_n_rois"])
+    ).fillna(0.0)
+    frame = frame.merge(lookup, on=keys, how="left", validate="many_to_one")
+    reference_value = frame["internal_reference_D0_mm2_s"]
+    frame["alpha_internal"] = frame["D0_mean_mm2_s"] / reference_value
+    relative_target = frame["D0_std_mm2_s"] / frame["D0_mean_mm2_s"]
+    relative_reference = frame["internal_reference_D0_sem_mm2_s"] / reference_value
+    frame["alpha_internal_error"] = frame["alpha_internal"] * np.sqrt(
+        relative_target**2 + relative_reference**2
+    )
+    return frame
+
+
 def _tc_pseudohuber(td_ms: np.ndarray, c: float, delta: float, alpha_macro: float) -> np.ndarray:
     td_ms = np.asarray(td_ms, dtype=float)
     return c + alpha_macro * delta * (np.sqrt(1.0 + (td_ms / delta) ** 2) - 1.0)
@@ -949,6 +1172,7 @@ def plot_signal_contrast_example(
     td_ms: float | None = 143.4,
     n_high: int = 8,
     n_low: int = 4,
+    gradient_column: str = "g",
     output_path: str | Path | None = None,
     dpi: int = 300,
 ) -> plt.Figure:
@@ -1000,8 +1224,8 @@ def plot_signal_contrast_example(
             & contrast_fits["ok"].fillna(False)
         ]
         for n_value, color in [(n_high, "#1f77b4"), (n_low, "#ff7f0e")]:
-            series = signal[pd.to_numeric(signal["N"], errors="coerce").eq(n_value)].sort_values("g_thorsten")
-            x = pd.to_numeric(series["g_thorsten"], errors="coerce") * pd.to_numeric(
+            series = signal[pd.to_numeric(signal["N"], errors="coerce").eq(n_value)].sort_values(gradient_column)
+            x = pd.to_numeric(series[gradient_column], errors="coerce") * pd.to_numeric(
                 series["grad_correction_factor"], errors="coerce"
             )
             signal_ax.plot(x, series["value_norm"], "o", color=color, label=f"N={n_value} data")
@@ -1078,6 +1302,7 @@ def export_all_signal_contrast_panels(
     output_dir: str | Path,
     n_high: int = 8,
     n_low: int = 4,
+    gradient_column: str = "g",
     dpi: int = 180,
     progress_every: int = 25,
     clean_output: bool = True,
@@ -1184,6 +1409,7 @@ def export_all_signal_contrast_panels(
             td_ms=float(combination["td_ms"]),
             n_high=n_high,
             n_low=n_low,
+            gradient_column=gradient_column,
             output_path=figure_path,
             dpi=dpi,
         )
@@ -1219,6 +1445,7 @@ def plot_contrast_lcf_grid(
     directions: Sequence[str] = DEFAULT_DIRECTIONS,
     lcf_limits_um: tuple[float, float] | None = (3.0, 12.0),
     output_path: str | Path | None = None,
+    dpi: int = 300,
 ) -> plt.Figure:
     """Plot Figure 2-style contrast curves with peak-time insets."""
 
@@ -1295,8 +1522,124 @@ def plot_contrast_lcf_grid(
             inset.grid(alpha=0.2)
     fig.suptitle(f"{subject} | {roi}: NOGSE-like contrast and transition fits", fontsize=15)
     fig.tight_layout()
-    _save_figure(fig, output_path)
+    _save_figure(fig, output_path, dpi=dpi)
     return fig
+
+
+def export_all_contrast_lcf_panels(
+    contrast: pd.DataFrame,
+    contrast_fits: pd.DataFrame,
+    tc_data: pd.DataFrame,
+    tc_summary: pd.DataFrame,
+    *,
+    variants: Sequence[str],
+    directions: Sequence[str],
+    output_dir: str | Path,
+    lcf_limits_um: tuple[float, float] | None = (3.0, 12.0),
+    dpi: int = 180,
+    progress_every: int = 10,
+    clean_output: bool = True,
+) -> pd.DataFrame:
+    """Export one Figure-2-style image for every subject and ROI.
+
+    Each image keeps all requested directions as columns, selected variants as
+    rows, and all available diffusion times as colored curves. The manifest
+    records incomplete or failed variant coverage without hiding the image.
+    """
+
+    keys = ["subj", "roi"]
+    _require_columns(contrast_fits, ["variant", "ok", *keys], "contrast_fits")
+    selected_variants = [str(variant) for variant in variants]
+    selected_directions = [str(direction) for direction in directions]
+    candidates = contrast_fits[
+        contrast_fits["variant"].astype(str).isin(selected_variants)
+        & contrast_fits["direction"].astype(str).isin(selected_directions)
+    ].copy()
+    if candidates.empty:
+        raise ValueError("No contrast-fit candidates match the selected variants and directions")
+
+    combinations = candidates[keys].drop_duplicates().sort_values(keys, kind="stable").reset_index(drop=True)
+    output_dir = Path(output_dir)
+    if clean_output and output_dir.exists():
+        for previous_figure in output_dir.rglob("*.png"):
+            previous_figure.unlink()
+        previous_manifest = output_dir / "manifest.csv"
+        if previous_manifest.exists():
+            previous_manifest.unlink()
+        for metadata_name in ("Thumbs.db", ".DS_Store"):
+            for metadata_file in output_dir.rglob(metadata_name):
+                metadata_file.unlink()
+        previous_directories = sorted(
+            (path for path in output_dir.rglob("*") if path.is_dir()),
+            key=lambda path: len(path.parts),
+            reverse=True,
+        )
+        for previous_directory in previous_directories:
+            try:
+                previous_directory.rmdir()
+            except OSError:
+                pass
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_rows: list[dict[str, object]] = []
+    total = len(combinations)
+    for index, combination in combinations.iterrows():
+        subject = str(combination["subj"])
+        roi = str(combination["roi"])
+        group = candidates[
+            candidates["subj"].astype(str).eq(subject)
+            & candidates["roi"].astype(str).eq(roi)
+        ]
+        successful = [
+            variant
+            for variant in selected_variants
+            if bool(group.loc[group["variant"].astype(str).eq(variant), "ok"].fillna(False).any())
+        ]
+        missing_or_failed = [variant for variant in selected_variants if variant not in successful]
+        observed_directions = [
+            direction
+            for direction in selected_directions
+            if bool(group["direction"].astype(str).eq(direction).any())
+        ]
+        figure_path = (
+            output_dir
+            / f"sub-{_safe_tag(subject)}"
+            / f"roi-{_safe_tag(roi)}__contrast-vs-filtered-length.png"
+        )
+        figure = plot_contrast_lcf_grid(
+            contrast,
+            contrast_fits,
+            tc_data,
+            tc_summary,
+            variants=selected_variants,
+            subject=subject,
+            roi=roi,
+            directions=selected_directions,
+            lcf_limits_um=lcf_limits_um,
+            output_path=figure_path,
+            dpi=dpi,
+        )
+        plt.close(figure)
+        manifest_rows.append(
+            {
+                "subj": subject,
+                "roi": roi,
+                "selected_variants": "|".join(selected_variants),
+                "requested_directions": "|".join(selected_directions),
+                "observed_directions": "|".join(observed_directions),
+                "successful_variants": "|".join(successful),
+                "missing_or_failed_variants": "|".join(missing_or_failed),
+                "all_selected_variants_successful": not missing_or_failed,
+                "figure_path": str(figure_path.relative_to(output_dir)),
+            }
+        )
+        completed = index + 1
+        if progress_every > 0 and (completed % int(progress_every) == 0 or completed == total):
+            print(f"Exported {completed}/{total} contrast-versus-filtered-length panels")
+
+    manifest = pd.DataFrame(manifest_rows)
+    manifest.to_csv(output_dir / "manifest.csv", index=False)
+    return manifest
 
 
 def _subject_markers(subjects: Sequence[str]) -> dict[str, str]:

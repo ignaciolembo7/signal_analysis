@@ -11,7 +11,7 @@ if [[ "$TYPE_SEQ" == "nogse" ]]; then
     DEFAULT_PLOT_SIGNAL_XCOL="${DEFAULT_PLOT_SIGNAL_XCOL:-g}"
 else
     PLOT_SIGNAL_SCRIPT="${PLOT_SIGNAL_SCRIPT:-$REPO_ROOT/scripts/plotting/plot_ogse_signal_vs_g.py}"
-    DEFAULT_PLOT_SIGNAL_XCOL="${DEFAULT_PLOT_SIGNAL_XCOL:-g_thorsten}"
+    DEFAULT_PLOT_SIGNAL_XCOL="${DEFAULT_PLOT_SIGNAL_XCOL:-g}"
 fi
 PLOT_ROW_KIND="${PLOT_ROW_KIND:-signal_rotated}"
 case "$PLOT_ROW_KIND" in

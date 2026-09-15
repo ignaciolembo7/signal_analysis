@@ -34,6 +34,37 @@ def _dproj_table() -> pd.DataFrame:
 
 
 class AlphaMacroSummaryTests(unittest.TestCase):
+    def test_default_keeps_direct_directions_without_reconstruction(self) -> None:
+        rows: list[dict[str, object]] = []
+        for direction, diffusivity in {
+            "x": 0.0010,
+            "y": 0.0020,
+            "z": 0.0040,
+            "long": 0.0040,
+            "tra": 0.0015,
+        }.items():
+            for delta in [20.0, 40.0]:
+                rows.append(
+                    {
+                        "subj": "P1",
+                        "sheets": "phantom_scan",
+                        "roi": "fiber1",
+                        "direction": direction,
+                        "bvalue": 500.0,
+                        "Delta_app_ms": delta,
+                        "D_mean_mm2_s": diffusivity,
+                    }
+                )
+
+        _, summary = compute_alpha_macro_summary(pd.DataFrame(rows))
+
+        self.assertEqual(set(summary["direction"]), {"x", "y", "z", "long", "tra"})
+        self.assertEqual(len(summary), 5)
+        self.assertNotIn("direction_kind", summary.columns)
+        direct = summary.set_index("direction")
+        self.assertAlmostEqual(float(direct.loc["long", "D0_mean_mm2_s"]), 0.0040)
+        self.assertAlmostEqual(float(direct.loc["tra", "D0_mean_mm2_s"]), 0.0015)
+
     def test_bvalmax_selects_candidate_bstep_from_plot_bvalues(self) -> None:
         _, summary = compute_alpha_macro_summary(
             _dproj_table(),

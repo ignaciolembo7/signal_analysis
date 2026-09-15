@@ -72,11 +72,15 @@ pipeline_set_dataset_defaults() {
             DWI_LEVEL="${DWI_LEVEL:-den_gr-topup}"
             ROI_VARIANT="${ROI_VARIANT:-plain}"
             PARAMS_XLSX="${PARAMS_XLSX:-$SIGNALS_ROOT/sequence_parameters_brains.xlsx}"
+            ALPHA_REFERENCE_D0_MM2_S="${ALPHA_REFERENCE_D0_MM2_S:-0.0032}"
+            ALPHA_REFERENCE_D0_ERROR_MM2_S="${ALPHA_REFERENCE_D0_ERROR_MM2_S:-0.0000283512}"
             ;;
         phantoms)
             DWI_LEVEL="${DWI_LEVEL:-raw}"
             ROI_VARIANT="${ROI_VARIANT:-manual}"
             PARAMS_XLSX="${PARAMS_XLSX:-$SIGNALS_ROOT/sequence_parameters_phantoms.xlsx}"
+            ALPHA_REFERENCE_D0_MM2_S="${ALPHA_REFERENCE_D0_MM2_S:-0.0023}"
+            ALPHA_REFERENCE_D0_ERROR_MM2_S="${ALPHA_REFERENCE_D0_ERROR_MM2_S:-0.0}"
             ;;
     esac
     SIGNAL_EXTRACTION_TAG="${SIGNAL_EXTRACTION_TAG:-${DWI_LEVEL}--${ROI_VARIANT}}"
@@ -104,6 +108,7 @@ pipeline_set_dataset_defaults() {
     MANIFEST_DIR="${MANIFEST_DIR:-$TEMPLATE_ROOT/manifests/${dataset}_${type_seq}}"
 
     export DATASET TYPE_SUBJ TYPE_SEQ EXPERIMENT_ROOT_NAME DWI_LEVEL ROI_VARIANT
+    export ALPHA_REFERENCE_D0_MM2_S ALPHA_REFERENCE_D0_ERROR_MM2_S
     export SIGNAL_EXTRACTION_TAG SIGNAL_EXTRACTION_LAYOUT ANALYSIS_TAG
 }
 
@@ -604,7 +609,7 @@ Variables for this step:
                           OGSE plots default to N=1,4,8,12 only.
   PLOT_SIGNAL_YCOL        value|value_norm. Default: value_norm
   PLOT_SIGNAL_XCOL        Gradient column (x axis).
-                          OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g_thorsten
+                          OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
                           NOGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
   PLOT_SIGNAL_G_TYPE      Backward-compatible alias for PLOT_SIGNAL_XCOL.
   PLOT_STAT               avg|std. Default: avg
@@ -616,7 +621,7 @@ Examples:
   PLOT_ROI=Left-Lateral-Ventricle PLOT_DIRECTION=long \
     bash signal_analysis/run_dataset.sh brain ogse plot_signal
 
-  PLOT_SUBJ=20220622_BRAIN PLOT_DIRECTION="long" PLOT_SIGNAL_XCOL=g_thorsten \
+  PLOT_SUBJ=20220622_BRAIN PLOT_DIRECTION="long" PLOT_SIGNAL_XCOL=g \
     bash signal_analysis/run_dataset.sh brain ogse plot_signal
 EOF
             ;;
@@ -782,7 +787,7 @@ Variables for this step:
                         fit_contrast_free         → presets ogse_free (OGSE) / nogse_free (NOGSE).
                         fit_contrast_mixed_global → presets ogse_mixed_global.
   FIT_GBASE             Gradient column for the x-axis.
-                        g|g_lin_max|g_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g_lin_max
+                        g|g_lin_max|g_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
   FIT_YCOL              value|value_norm. Default: value_norm
   FIT_STAT              avg|std|ALL. Default: avg
   FIT_EXTRA_ARGS        Extra fit_<type_seq>_contrast_vs_g.py options (see below).
@@ -927,8 +932,8 @@ Variables for this step:
                                  Default: ogse_mixed_offset (OGSE) | nogse_mixed_offset (NOGSE)
   GLOBAL_SIGNAL_YCOL             value|value_norm. Default: value
   GLOBAL_SIGNAL_G_TYPE           Gradient column.
-                                 OGSE brain: g_thorsten (default) | g_lin_max | bvalue_thorsten | ...
-                                 OGSE phantom / NOGSE: g (default) | g_lin_max | g_thorsten | ...
+                                 OGSE/NOGSE brain and phantom: g (default) | g_lin_max | g_thorsten | ...
+                                 Use g_thorsten only for an explicit legacy sensitivity analysis.
   GLOBAL_SIGNAL_STAT             avg|std. Default: avg
   GLOBAL_SIGNAL_MIN_POINTS       Minimum points per group to attempt a fit. Default: 4
   Parameter modes and fixed values
@@ -1050,6 +1055,12 @@ Variables for this step:
   PLOT_D0_SCRIPT       Python script override for plot_D0_vs_Delta.py.
   ALPHA_N              N selector passed to make_alpha_macro_summary.py. Default: 1
   ALPHA_OUT_DIR        Output directory for all outputs. Default: $ANALYSIS_ROOT/alpha_macro/master
+  ALPHA_REFERENCE_D0_MM2_S
+                       Reference diffusivity in mm2/s.
+                       Default: 0.0032 (brains) | 0.0023 (phantoms)
+  ALPHA_REFERENCE_D0_ERROR_MM2_S
+                       Reference-diffusivity error in mm2/s.
+                       Default: 0.0000283512 (brains) | 0.0 (phantoms)
   ALPHA_PLOT_BSTEPS    Space-separated bvalue positions to use as candidates for
                        alpha selection and to draw in D-vs-Delta plots.
   ALPHA_PLOT_BVALUES   Space-separated rounded bvalues to use as candidates for
@@ -1079,7 +1090,8 @@ Useful ALPHA_EXTRA_ARGS (passed to make_alpha_macro_summary.py):
   --subjs S1 S2            Restrict summary to specific subj values, e.g. MBBL LUDG.
   --sheets SHEET1 SHEET2   Restrict summary to specific sheet/session names,
                            e.g. 20230630_MBBL-3 20230710_LUDG-3.
-  --reference-D0 F         Reference D0 used to compute alpha_macro. Default: 0.0032
+  --reference-D0 F         Reference D0 used to compute alpha_macro.
+                           The runner passes 0.0032 for brains and 0.0023 for phantoms.
   --no-annotate-master-alpha
                            Do not write alpha_macro back to MASTER_PARQUET.
                            Useful for testing subset commands.
@@ -1091,7 +1103,8 @@ Useful PLOT_D0_EXTRA_ARGS (passed only to plot_D0_vs_Delta.py):
                            Example: --plot-bsteps 1 3 5
   --plot-bvalues B1 B2     Plot only these rounded bvalues per group.
                            Example: --plot-bvalues 300 600
-  --reference-D0 F         Reference D0 used for the horizontal annotation. Default: 0.0032
+  --reference-D0 F         Reference D0 used for the horizontal annotation.
+                           The runner passes the same dataset-specific value as alpha.
 
 Outputs:
   $MASTER_PARQUET                                updated with alpha_macro column

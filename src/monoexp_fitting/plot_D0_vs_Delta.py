@@ -64,7 +64,7 @@ def load_selected_bstep_map(summary_alpha: str | Path) -> dict[tuple[str, str, s
         return {}
 
     if "direction_kind" in out.columns:
-        out["_pref"] = out["direction_kind"].astype(str).str.lower().map(lambda v: 0 if v == "derived" else 1)
+        out["_pref"] = out["direction_kind"].astype(str).str.lower().map(lambda v: 1 if v == "derived" else 0)
     else:
         out["_pref"] = 0
 
@@ -116,7 +116,7 @@ def load_selected_bvalue_map(summary_alpha: str | Path) -> dict[tuple[str, str, 
         return {}
 
     if "direction_kind" in out.columns:
-        out["_pref"] = out["direction_kind"].astype(str).str.lower().map(lambda v: 0 if v == "derived" else 1)
+        out["_pref"] = out["direction_kind"].astype(str).str.lower().map(lambda v: 1 if v == "derived" else 0)
     else:
         out["_pref"] = 0
 

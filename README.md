@@ -609,7 +609,7 @@ Generates signal-vs-gradient plots directly from `master.long.parquet`.
 | `PLOT_OUT_ROOT` | `$ANALYSIS_ROOT/plots-master/signal/$PLOT_ROW_KIND` | Output directory |
 | `PLOT_ROW_KIND` | `signal_rotated` | `signal_rotated` or `signal` |
 | `PLOT_SIGNAL_YCOL` | `value_norm` | `value` or `value_norm` |
-| `PLOT_SIGNAL_XCOL` | depends on `type_seq` | X-axis column, e.g. `g_thorsten`, `g`, or `bvalue_thorsten` |
+| `PLOT_SIGNAL_XCOL` | `g` | X-axis column; `g_thorsten` remains available only for explicit legacy analyses |
 | `PLOT_STAT` | `avg` | `avg` or `std` |
 | `PLOT_SUBJ` | all | Subject filter |
 | `PLOT_ROI` | all | ROI filter |
@@ -632,7 +632,7 @@ PLOT_ROW_KIND=signal_rotated \
 PLOT_ROI=Left-Lateral-Ventricle PLOT_DIRECTION=long \
   nohup bash signal_analysis/run_dataset.sh brain ogse plot_signal > logs/plot_signal.log 2>&1 &
 
-PLOT_SUBJ=20220622_BRAIN PLOT_DIRECTION=long PLOT_SIGNAL_XCOL=g_thorsten \
+PLOT_SUBJ=20220622_BRAIN PLOT_DIRECTION=long PLOT_SIGNAL_XCOL=g \
   nohup bash signal_analysis/run_dataset.sh brain ogse plot_signal > logs/plot_signal.log 2>&1 &
 ```
 
@@ -847,10 +847,17 @@ GRAD_CORR_ROI=Water2 \
 Computes macroscopic alpha from `D_proj` values in `signal_rotated` master rows.
 Also generates D-vs-Delta_app plots.
 
+The dataset runner passes the same dataset-specific reference to both the
+alpha summary and the D-vs-Delta plotter: `0.0032 mm2/s` for brains and
+`0.0023 mm2/s` for phantoms. In the signal-model units these are respectively
+`3.2e-12 m2/ms` and `2.3e-12 m2/ms`.
+
 | Variable | Default | Description |
 |---|---|---|
 | `ALPHA_N` | `1` | N selector for `make_alpha_macro_summary.py` |
 | `ALPHA_OUT_DIR` | `$ANALYSIS_ROOT/alpha_macro/master` | Output directory |
+| `ALPHA_REFERENCE_D0_MM2_S` | brains: `0.0032`; phantoms: `0.0023` | Reference diffusivity for alpha and plot annotations |
+| `ALPHA_REFERENCE_D0_ERROR_MM2_S` | brains: `0.0000283512`; phantoms: `0.0` | Reference-diffusivity uncertainty |
 | `ALPHA_PLOT_BSTEPS` | none | Candidate b-value positions used for alpha selection and D-vs-Delta plots |
 | `ALPHA_PLOT_BVALUES` | none | Candidate rounded b-values used for alpha selection and D-vs-Delta plots |
 | `ALPHA_EXTRA_ARGS` | none | Extra arguments for `make_alpha_macro_summary.py` |
@@ -863,6 +870,11 @@ Useful `ALPHA_EXTRA_ARGS`: `--bvalmax 5`, `--roi-bvalmax AntCC=7`,
 `--dirs long tra`, `--subjs MBBL LUDG`, `--sheets 20230630_MBBL-3`.
 Add `--no-annotate-master-alpha` when testing a subset and you do not want the
 step to write `alpha_macro` back into `master.long.parquet`.
+
+The alpha summary uses the direct `long` and `tra` rows written by the rotation
+step. It does not reconstruct them from `x`, `y`, or `z`. The
+`--direction-alias` option is available only as an explicit compatibility path
+for legacy external tables that lack direct rotated directions.
 
 Subject filters:
 
@@ -968,20 +980,38 @@ analysis. It reads only canonical signal-analysis master tables and their
 The contrast follows `research/analysis_project_balseiro_microstructure.docx`.
 It does not subtract N=8 and N=4 measurements by `b_step`. It first corrects
 each branch's gradient axis and jointly fits the two normalized signals with
-the restricted OGSE signal model. The branch correlation times are independent,
-while the normalized Rician floor parameter `C` is shared within the pair.
-Both fitted signals are then evaluated on one common corrected-gradient grid
-over their observed overlap, and the contrast is defined as
-`M_N8_fit(g) - M_N4_fit(g)`. Peak-gradient transformations therefore use one
-well-defined gradient value.
+the restricted OGSE signal model. The normalized Rician floor parameter `C`
+is shared within the pair. The historical independent-correlation-time fit and
+a physically constrained shared-correlation-time fit are both available and
+audited with AIC/AICc/BIC. Both fitted signals are evaluated on one common
+corrected-gradient grid over their observed overlap, and the contrast is
+defined as `M_N8_fit(g) - M_N4_fit(g)`.
 
 Use the configuration cell to select `DATASET = 'brains'` or
 `DATASET = 'phantoms'`. The brain profile uses `den_gr-topup`, the corpus
-callosum ROIs, and the brain reference diffusivity. The phantom profile uses
-`raw`, discovers ROIs and directions from the master, and applies the phantom
-reference diffusivity. Variant discovery is automatic, including future
-analysis tags; explicit variant, ROI, direction, DWI-level, and example-panel
-overrides remain available.
+callosum ROIs, and the brain reference diffusivity. For phantoms, setting
+`SUBJECTS_OVERRIDE = ['20220610P']` automatically uses `den_gr--manual`, while
+`['20260706P']` uses `den_gr-topup--manual`; no DWI-level edit is needed.
+The profile discovers ROIs and directions from the selected master and applies
+the phantom reference diffusivity.
+Variant discovery is automatic, including future analysis tags; explicit
+variant, ROI, direction, DWI-level, and example-panel overrides remain
+available.
+
+Section 11 compares `20220610P` (`den_gr--manual`) with `20260706P`
+(`den_gr-topup--manual`) and compares the brain cohort against a selectable
+phantom, defaulting to `20260706P`. It exports full-curve metrics, harmonized
+and same-scan-reference alpha values, protocol-compatibility checks, and the
+shared-versus-separate model audit under
+`notebooks/outputs/esmrmb_variant_comparison/cross_dataset/`. See
+`docs/esmrmb_phantom_brain_analysis_report.md` for the scientific audit and
+recommended outcome hierarchy.
+
+With `EXPORT_ALL_CONTRAST_LCF_PANELS = True`, `Run All` also creates one
+Figure-02-style contrast-versus-filtered-length image for every selected
+subject/ROI under `02_all_contrast_vs_filtered_length/`. Each image contains
+all selected directions and diffusion times, and `manifest.csv` indexes the
+generated files and variant coverage.
 
 Brain and phantom results are exported separately under:
 

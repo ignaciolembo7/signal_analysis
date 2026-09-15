@@ -23,6 +23,8 @@ alpha_plot_args=()
     --master-parquet "$MASTER_PARQUET" \
     --no-master-fit-params \
     --N "${ALPHA_N:-1}" \
+    --reference-D0 "${ALPHA_REFERENCE_D0_MM2_S:-0.0032}" \
+    --reference-D0-error "${ALPHA_REFERENCE_D0_ERROR_MM2_S:-0.0000283512}" \
     --out-summary "$SUMMARY_ALPHA" \
     --out-avg "$ALPHA_OUT_DIR/D_vs_delta_app.combined.xlsx" \
     "${alpha_plot_args[@]}" \
@@ -36,6 +38,8 @@ if [[ -f "$PLOT_D0_SCRIPT" ]]; then
         --master-parquet "$MASTER_PARQUET"
         --out-dir "$ALPHA_OUT_DIR"
         --summary-alpha "$SUMMARY_ALPHA"
+        --reference-D0 "${ALPHA_REFERENCE_D0_MM2_S:-0.0032}"
+        --reference-D0-error "${ALPHA_REFERENCE_D0_ERROR_MM2_S:-0.0000283512}"
     )
     [[ -n "${DPROJ_N:-}" ]]    && plot_args+=(--N "$DPROJ_N")
     [[ -n "${DPROJ_HZ:-}" ]]   && plot_args+=(--Hz "$DPROJ_HZ")
