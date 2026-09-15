@@ -1065,6 +1065,9 @@ Variables for this step:
                        alpha selection and to draw in D-vs-Delta plots.
   ALPHA_PLOT_BVALUES   Space-separated rounded bvalues to use as candidates for
                        alpha selection and to draw in D-vs-Delta plots.
+  ALPHA_EXCLUDE_PLOT_BVALUES
+                       Space-separated rounded bvalues omitted only from D-vs-Delta plots.
+                       This does not change alpha selection.
   ALPHA_EXTRA_ARGS     Extra options forwarded to make_alpha_macro_summary.py (see below).
   DPROJ_N              N selector for the D-vs-Delta plots (if different from ALPHA_N).
   DPROJ_HZ             Hz selector for the D-vs-Delta plots.
@@ -1085,6 +1088,8 @@ Useful ALPHA_EXTRA_ARGS (passed to make_alpha_macro_summary.py):
                            Default: highest candidate bvalue.
   --roi-bvalmax ROI=X      Per-ROI override. X can be a candidate bstep or a bvalue.
                            Example: --roi-bvalmax CSF=3 or --roi-bvalmax CSF=1280
+  --roi-bvalmax ROI:DIR=X  Per-ROI/direction override; takes precedence over ROI=X.
+                           Example: --roi-bvalmax fiber1:long=500
   --dirs DIR1 DIR2         Restrict summary to specific directions.
   --rois ROI1 ROI2         Restrict summary to specific ROIs.
   --subjs S1 S2            Restrict summary to specific subj values, e.g. MBBL LUDG.
@@ -1103,6 +1108,8 @@ Useful PLOT_D0_EXTRA_ARGS (passed only to plot_D0_vs_Delta.py):
                            Example: --plot-bsteps 1 3 5
   --plot-bvalues B1 B2     Plot only these rounded bvalues per group.
                            Example: --plot-bvalues 300 600
+  --exclude-plot-bvalues B1 B2
+                           Do not draw these rounded bvalues. Alpha is unchanged.
   --reference-D0 F         Reference D0 used for the horizontal annotation.
                            The runner passes the same dataset-specific value as alpha.
 

@@ -17,19 +17,20 @@ from tc_fittings.alpha_macro_summary import compute_alpha_macro_summary  # noqa:
 def _dproj_table() -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for roi in ["Left-Lateral-Ventricle", "Syringe"]:
-        for bvalue in [100.0, 500.0, 980.0, 1280.0, 2000.0]:
-            for delta in [20.0, 40.0]:
-                rows.append(
-                    {
-                        "subj": "MBBL",
-                        "sheets": "20230630_MBBL-3",
-                        "roi": roi,
-                        "direction": "long",
-                        "bvalue": bvalue,
-                        "Delta_app_ms": delta,
-                        "D_mean_mm2_s": bvalue / 1_000_000.0,
-                    }
-                )
+        for direction in ["long", "tra"]:
+            for bvalue in [100.0, 500.0, 980.0, 1280.0, 2000.0]:
+                for delta in [20.0, 40.0]:
+                    rows.append(
+                        {
+                            "subj": "MBBL",
+                            "sheets": "20230630_MBBL-3",
+                            "roi": roi,
+                            "direction": direction,
+                            "bvalue": bvalue,
+                            "Delta_app_ms": delta,
+                            "D_mean_mm2_s": bvalue / 1_000_000.0,
+                        }
+                    )
     return pd.DataFrame(rows)
 
 
@@ -86,11 +87,29 @@ class AlphaMacroSummaryTests(unittest.TestCase):
             direction_aliases={},
         )
 
-        by_roi = summary.set_index("roi")
+        by_roi = summary.groupby("roi", as_index=True).first()
         self.assertEqual(float(by_roi.loc["Left-Lateral-Ventricle", "selected_bvalue"]), 500.0)
         self.assertEqual(int(by_roi.loc["Left-Lateral-Ventricle", "selected_bstep"]), 2)
         self.assertEqual(float(by_roi.loc["Syringe", "selected_bvalue"]), 1280.0)
         self.assertEqual(int(by_roi.loc["Syringe", "selected_bstep"]), 4)
+
+    def test_roi_direction_bvalmax_takes_precedence(self) -> None:
+        _, summary = compute_alpha_macro_summary(
+            _dproj_table(),
+            selected_bstep=2000,
+            roi_selected_bsteps={"Syringe": 980.0},
+            roi_direction_selected_bsteps={
+                ("Left-Lateral-Ventricle", "long"): 500.0,
+                ("Left-Lateral-Ventricle", "tra"): 2000.0,
+            },
+            direction_aliases={},
+        )
+
+        selected = summary.set_index(["roi", "direction"])["selected_bvalue"]
+        self.assertEqual(float(selected.loc[("Left-Lateral-Ventricle", "long")]), 500.0)
+        self.assertEqual(float(selected.loc[("Left-Lateral-Ventricle", "tra")]), 2000.0)
+        self.assertEqual(float(selected.loc[("Syringe", "long")]), 980.0)
+        self.assertEqual(float(selected.loc[("Syringe", "tra")]), 980.0)
 
 
 if __name__ == "__main__":

@@ -44,21 +44,31 @@ def _canonical_roi_name(value: str) -> str:
     return str(value).strip().replace("_norm", "").lower()
 
 
-def _parse_roi_bvalmax(items: list[str] | None) -> dict[str, float]:
+def _parse_roi_bvalmax(
+    items: list[str] | None,
+) -> tuple[dict[str, float], dict[tuple[str, str], float]]:
     if not items:
-        return {}
-    out: dict[str, int] = {}
+        return {}, {}
+    roi_values: dict[str, float] = {}
+    roi_direction_values: dict[tuple[str, str], float] = {}
     for raw in items:
         token = str(raw).strip()
         if "=" not in token:
             raise ValueError(
-                f"Invalid --roi-bvalmax value {raw!r}. Use ROI=BSTEP_OR_BVALUE format, for example AntCC=7 or AntCC=1280."
+                f"Invalid --roi-bvalmax value {raw!r}. Use ROI=X or ROI:DIRECTION=X, "
+                "for example AntCC=2000 or fiber1:long=500."
             )
-        roi, bstep = token.split("=", 1)
-        roi = roi.strip()
+        selector, bstep = token.split("=", 1)
+        selector = selector.strip()
         bstep = bstep.strip()
+        if ":" in selector:
+            roi, direction = (part.strip() for part in selector.rsplit(":", 1))
+        else:
+            roi, direction = selector, None
         if not roi:
             raise ValueError(f"Invalid ROI in --roi-bvalmax {raw!r}.")
+        if direction is not None and not direction:
+            raise ValueError(f"Invalid direction in --roi-bvalmax {raw!r}.")
         try:
             value = float(bstep)
         except ValueError as exc:
@@ -69,8 +79,11 @@ def _parse_roi_bvalmax(items: list[str] | None) -> dict[str, float]:
             raise ValueError(
                 f"Invalid BSTEP/BVALUE in --roi-bvalmax {raw!r}. It must be a number >= 1."
             )
-        out[roi] = value
-    return out
+        if direction is None:
+            roi_values[roi] = value
+        else:
+            roi_direction_values[(roi, direction)] = value
+    return roi_values, roi_direction_values
 
 
 def _load_measurements_from_args(args: argparse.Namespace) -> pd.DataFrame:
@@ -275,9 +288,10 @@ def main() -> None:
         action="append",
         default=None,
         help=(
-            "Per-ROI bstep/bvalue override, repeatable, format ROI=X. "
-            "Example: --roi-bvalmax AntCC=7 --roi-bvalmax MidAntCC=1280. "
-            "If an ROI is not listed, the global --bvalmax is used, or the highest bvalue."
+            "Per-ROI or per-ROI/direction bstep/bvalue override, repeatable. Use ROI=X or "
+            "ROI:DIRECTION=X. Example: --roi-bvalmax Syringe=980 "
+            "--roi-bvalmax fiber1:long=500. A direction-specific value takes precedence over "
+            "the ROI value, then --bvalmax, then the highest bvalue."
         ),
     )
     ap.add_argument("--reference-D0", type=float, default=0.0032, help="Reference value used for alpha_macro.")
@@ -309,31 +323,54 @@ def main() -> None:
     df_avg = _load_measurements_from_args(args)
     if "roi" in df_avg.columns:
         df_avg["roi"] = df_avg["roi"].astype(str).str.strip().str.replace("_norm", "", regex=False)
-    roi_bvalmax = _parse_roi_bvalmax(args.roi_bvalmax)
-    if roi_bvalmax:
-        roi_presentes = [str(x) for x in df_avg["roi"].dropna().astype(str).tolist()]
+    roi_bvalmax, roi_direction_bvalmax = _parse_roi_bvalmax(args.roi_bvalmax)
+    if roi_bvalmax or roi_direction_bvalmax:
+        present_rois = [str(x) for x in df_avg["roi"].dropna().astype(str).tolist()]
         roi_canon_to_actual: dict[str, str] = {}
-        for roi_name in roi_presentes:
+        for roi_name in present_rois:
             key = _canonical_roi_name(roi_name)
             if key and key not in roi_canon_to_actual:
                 roi_canon_to_actual[key] = roi_name
 
+        present_directions = [str(x) for x in df_avg["direction"].dropna().astype(str).tolist()]
+        direction_canon_to_actual: dict[str, str] = {}
+        for direction_name in present_directions:
+            key = direction_name.strip().lower()
+            if key and key not in direction_canon_to_actual:
+                direction_canon_to_actual[key] = direction_name
+
         roi_bvalmax_resolved: dict[str, float] = {}
-        roi_desconocidos: list[str] = []
+        roi_direction_bvalmax_resolved: dict[tuple[str, str], float] = {}
+        unknown_rois: list[str] = []
         for roi_name, bstep in roi_bvalmax.items():
             key = _canonical_roi_name(roi_name)
             actual = roi_canon_to_actual.get(key)
             if actual is None:
-                roi_desconocidos.append(roi_name)
+                unknown_rois.append(roi_name)
                 continue
             roi_bvalmax_resolved[actual] = bstep
 
-        if roi_desconocidos:
+        unknown_selectors: list[str] = []
+        for (roi_name, direction_name), bstep in roi_direction_bvalmax.items():
+            actual_roi = roi_canon_to_actual.get(_canonical_roi_name(roi_name))
+            actual_direction = direction_canon_to_actual.get(direction_name.strip().lower())
+            if actual_roi is None or actual_direction is None:
+                unknown_selectors.append(f"{roi_name}:{direction_name}")
+                continue
+            roi_direction_bvalmax_resolved[(actual_roi, actual_direction)] = bstep
+
+        if unknown_rois:
             print(
                 "[WARN] ROIs in --roi-bvalmax are not present in the filtered data; ignoring: "
-                + ", ".join(sorted(roi_desconocidos))
+                + ", ".join(sorted(unknown_rois))
+            )
+        if unknown_selectors:
+            print(
+                "[WARN] ROI/direction selectors in --roi-bvalmax are not present in the filtered data; ignoring: "
+                + ", ".join(sorted(unknown_selectors))
             )
         roi_bvalmax = roi_bvalmax_resolved
+        roi_direction_bvalmax = roi_direction_bvalmax_resolved
     aliases = parse_direction_aliases(args.direction_alias)
     df_avg, df_summary = compute_alpha_macro_summary(
         df_avg,
@@ -341,6 +378,7 @@ def main() -> None:
         reference_D0_error=float(args.reference_D0_error),
         selected_bstep=args.bvalmax,
         roi_selected_bsteps=roi_bvalmax or None,
+        roi_direction_selected_bsteps=roi_direction_bvalmax or None,
         candidate_bsteps=args.plot_bsteps,
         candidate_bvalues=args.plot_bvalues,
         direction_aliases=aliases,

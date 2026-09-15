@@ -140,6 +140,16 @@ def main() -> None:
             "Values are compared after --bvalue-decimals rounding. Example: --plot-bvalues 300 600."
         ),
     )
+    ap.add_argument(
+        "--exclude-plot-bvalues",
+        nargs="+",
+        type=float,
+        default=None,
+        help=(
+            "Do not draw these rounded b-values. This is a plotting-only filter and does not alter "
+            "alpha selection. Values are compared after --bvalue-decimals rounding."
+        ),
+    )
     ap.add_argument("--reference-D0", type=float, default=0.0032, help="Reference value used to annotate alpha in the plot.")
     ap.add_argument("--reference-D0-error", type=float, default=0.0000283512, help="Reference value error.")
     ap.add_argument(
@@ -224,6 +234,7 @@ def main() -> None:
         selected_bvalue_by_group=selected_bvalue_by_group,
         plot_bsteps=args.plot_bsteps,
         plot_bvalues=args.plot_bvalues,
+        exclude_plot_bvalues=args.exclude_plot_bvalues,
         reference_D0=float(args.reference_D0),
         reference_D0_error=float(args.reference_D0_error),
     )

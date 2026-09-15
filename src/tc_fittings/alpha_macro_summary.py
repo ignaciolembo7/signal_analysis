@@ -277,6 +277,7 @@ def plot_d_vs_delta_curves(
     selected_bvalue_by_group: Mapping[tuple[str, str, str], float] | None = None,
     plot_bsteps: Sequence[int] | None = None,
     plot_bvalues: Sequence[float] | None = None,
+    exclude_plot_bvalues: Sequence[float] | None = None,
     reference_D0: float | None = None,
     reference_D0_error: float | None = None,
 ) -> list[Path]:
@@ -289,6 +290,8 @@ def plot_d_vs_delta_curves(
         raise ValueError("plot_bsteps values must be >= 1.")
     plot_bvalue_arr = np.asarray(list(plot_bvalues or []), dtype=float)
     plot_bvalue_arr = plot_bvalue_arr[np.isfinite(plot_bvalue_arr)]
+    excluded_bvalue_arr = np.asarray(list(exclude_plot_bvalues or []), dtype=float)
+    excluded_bvalue_arr = excluded_bvalue_arr[np.isfinite(excluded_bvalue_arr)]
 
     for (subj, roi, direction), sub in df_avg.groupby(["subj", "roi", "direction"], sort=True):
         sub = sub.sort_values(["bvalue", "Delta_app_ms"], kind="stable")
@@ -302,6 +305,11 @@ def plot_d_vs_delta_curves(
             bvalues_to_plot = [
                 bvalue for bvalue in bvalues_to_plot
                 if np.any(np.isclose(float(bvalue), plot_bvalue_arr, rtol=0.0, atol=1e-6))
+            ]
+        if excluded_bvalue_arr.size:
+            bvalues_to_plot = [
+                bvalue for bvalue in bvalues_to_plot
+                if not np.any(np.isclose(float(bvalue), excluded_bvalue_arr, rtol=0.0, atol=1e-6))
             ]
         if not bvalues_to_plot:
             print(
@@ -433,6 +441,7 @@ def compute_alpha_macro_summary(
     reference_D0_error: float = 0.0000283512,
     selected_bstep: float | None = None,
     roi_selected_bsteps: dict[str, float] | None = None,
+    roi_direction_selected_bsteps: Mapping[tuple[str, str], float] | None = None,
     candidate_bsteps: Sequence[int] | None = None,
     candidate_bvalues: Sequence[float] | None = None,
     direction_aliases: dict[str, str] | None = None,
@@ -448,8 +457,10 @@ def compute_alpha_macro_summary(
         if len(bvalues) == 0:
             continue
         roi_bstep = None
+        if roi_direction_selected_bsteps is not None:
+            roi_bstep = roi_direction_selected_bsteps.get((str(roi), str(direction)))
         if roi_selected_bsteps is not None:
-            roi_bstep = roi_selected_bsteps.get(str(roi))
+            roi_bstep = roi_bstep if roi_bstep is not None else roi_selected_bsteps.get(str(roi))
         selected_bvalue, chosen_bstep = _select_bvalue_and_bstep(
             bvalues,
             selected_bstep=roi_bstep if roi_bstep is not None else selected_bstep,

@@ -172,6 +172,7 @@ def plot_all_groups(
     selected_bvalue_by_group: Mapping[tuple[str, str, str], float] | None = None,
     plot_bsteps: Sequence[int] | None = None,
     plot_bvalues: Sequence[float] | None = None,
+    exclude_plot_bvalues: Sequence[float] | None = None,
     reference_D0: float | None = None,
     reference_D0_error: float | None = None,
 ) -> list[Path]:
@@ -183,6 +184,7 @@ def plot_all_groups(
         selected_bvalue_by_group=selected_bvalue_by_group,
         plot_bsteps=plot_bsteps,
         plot_bvalues=plot_bvalues,
+        exclude_plot_bvalues=exclude_plot_bvalues,
         reference_D0=reference_D0,
         reference_D0_error=reference_D0_error,
     )

@@ -47,5 +47,6 @@ if [[ -f "$PLOT_D0_SCRIPT" ]]; then
     [[ -n "${DPROJ_DIRS:-}" ]] && plot_args+=(--dirs ${DPROJ_DIRS})
     [[ -n "${ALPHA_PLOT_BSTEPS:-}" ]]  && plot_args+=(--plot-bsteps ${ALPHA_PLOT_BSTEPS})
     [[ -n "${ALPHA_PLOT_BVALUES:-}" ]] && plot_args+=(--plot-bvalues ${ALPHA_PLOT_BVALUES})
+    [[ -n "${ALPHA_EXCLUDE_PLOT_BVALUES:-}" ]] && plot_args+=(--exclude-plot-bvalues ${ALPHA_EXCLUDE_PLOT_BVALUES})
     "$PY" "$PLOT_D0_SCRIPT" "${plot_args[@]}" ${PLOT_D0_EXTRA_ARGS:-}
 fi

@@ -860,6 +860,7 @@ alpha summary and the D-vs-Delta plotter: `0.0032 mm2/s` for brains and
 | `ALPHA_REFERENCE_D0_ERROR_MM2_S` | brains: `0.0000283512`; phantoms: `0.0` | Reference-diffusivity uncertainty |
 | `ALPHA_PLOT_BSTEPS` | none | Candidate b-value positions used for alpha selection and D-vs-Delta plots |
 | `ALPHA_PLOT_BVALUES` | none | Candidate rounded b-values used for alpha selection and D-vs-Delta plots |
+| `ALPHA_EXCLUDE_PLOT_BVALUES` | none | Rounded b-values omitted only from D-vs-Delta plots; alpha selection is unchanged |
 | `ALPHA_EXTRA_ARGS` | none | Extra arguments for `make_alpha_macro_summary.py` |
 | `DPROJ_N` | same as `ALPHA_N` | N selector for D-vs-Delta plots when it should differ from `ALPHA_N` |
 | `DPROJ_DIRS` | none | Direction filter for D-vs-Delta plots |
@@ -900,12 +901,19 @@ selector can be either a candidate bstep or a b-value:
 - `--bvalmax 2000` means “use b=2000”.
 - `--roi-bvalmax Syringe=3` means “for Syringe, use the 3rd candidate b-value”.
 - `--roi-bvalmax Syringe=1280` means “for Syringe, use b=1280”.
+- `--roi-bvalmax fiber1:long=500` means “for fiber1/long, use b=500”.
+
+A direction-specific `ROI:DIRECTION=X` selector takes precedence over `ROI=X`,
+which takes precedence over the global `--bvalmax`.
 
 `PLOT_D0_EXTRA_ARGS="--plot-bsteps ..."` and
 `PLOT_D0_EXTRA_ARGS="--plot-bvalues ..."` are still available for plotting-only
 filters, but they do not affect the alpha calculation. Prefer
 `ALPHA_PLOT_BSTEPS` / `ALPHA_PLOT_BVALUES` when alpha and plots should use the
 same b-value subset.
+
+Use `ALPHA_EXCLUDE_PLOT_BVALUES="20 80 180"` to hide selected curves without
+changing the b-values available to the alpha calculation.
 
 Outputs under `$ALPHA_OUT_DIR/`:
 
