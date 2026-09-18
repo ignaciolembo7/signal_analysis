@@ -10,10 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
+from matplotlib.ticker import MaxNLocator
 from scipy.optimize import least_squares
 
 from models.model_fitting import M_ogse_rest_offset, OGSE_contrast_vs_g_rest
@@ -22,6 +24,7 @@ from models.model_fitting import M_ogse_rest_offset, OGSE_contrast_vs_g_rest
 CC_ROIS = ("AntCC", "MidAntCC", "CentralCC", "MidPostCC", "PostCC")
 DEFAULT_DIRECTIONS = ("long", "tra")
 GAMMA_RAD_MS_MT = 267.5221900
+LCF_CONVENTION = "capiglioni_2021"
 
 _KEY_COLUMNS = (
     "row_kind",
@@ -469,6 +472,7 @@ def build_resampled_contrasts(
         fit_row: dict[str, object] = {
             **metadata,
             "gradient_column": str(gradient_column),
+            "lcf_convention": LCF_CONVENTION,
             "N_high": int(n_high),
             "N_low": int(n_low),
             "D0_m2_ms": float(d0_m2_ms),
@@ -627,6 +631,7 @@ def build_resampled_contrasts(
                     "peak_at_boundary": bool(peak_index in {0, len(g_resampled) - 1}),
                     "signal_peak": float(contrast[peak_index]),
                     "lcf_peak_um": lcf_peak_um,
+                    "tau_f_peak_ms": tc_peak_ms,
                     "tc_peak_ms": tc_peak_ms,
                     "source_file_high": str(high["source_file"].iloc[0]),
                     "source_file_low": str(low["source_file"].iloc[0]),
@@ -644,6 +649,7 @@ def build_resampled_contrasts(
                         "N_high": int(n_high),
                         "N_low": int(n_low),
                         "gradient_column": str(gradient_column),
+                        "lcf_convention": LCF_CONVENTION,
                         "g_resampled_corr": g_resampled,
                         "g_high_corr": g_resampled,
                         "g_low_corr": g_resampled,
@@ -652,6 +658,7 @@ def build_resampled_contrasts(
                         "contrast": contrast,
                         "contrast_std": np.nan,
                         "lcf_um": [value[0] for value in lcf_axes],
+                        "tau_f_axis_ms": [value[1] for value in lcf_axes],
                         "tc_axis_ms": [value[1] for value in lcf_axes],
                     }
                 )
@@ -685,6 +692,11 @@ def summarize_contrast_shape(resampled: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, object]] = []
     for key, group in resampled.groupby(keys, sort=False, dropna=False):
         metadata = dict(zip(keys, key))
+        metadata["lcf_convention"] = (
+            str(group["lcf_convention"].iloc[0])
+            if "lcf_convention" in group.columns
+            else LCF_CONVENTION
+        )
         g = pd.to_numeric(group["g_resampled_corr"], errors="coerce").to_numpy(float)
         y = pd.to_numeric(group["contrast"], errors="coerce").to_numpy(float)
         lcf = pd.to_numeric(group["lcf_um"], errors="coerce").to_numpy(float)
@@ -756,14 +768,23 @@ def _standard_errors(result, transform: Sequence[str]) -> np.ndarray:
 
 
 def _derived_peak_axes(td_ms: float, g_raw_mtm: float, d0_m2_ms: float) -> tuple[float, float]:
+    """Return the published NOGSE filter length and its invariant time.
+
+    This follows Capiglioni et al., Phys. Rev. Applied 15, 014045
+    (2021): ``l_D = sqrt(D0 * T_D)``, ``l_G = (D0 / gamma g)^(1/3)``,
+    and ``L_cf = (3/2)^(1/4) L_D^(-1/2)``.  The associated filter time
+    is therefore ``tau_f = l_cf^2 / D0``.  The one-dimensional RMS length
+    used by the previous implementation was exactly ``sqrt(2)`` larger.
+    """
+
     if not np.isfinite(g_raw_mtm) or g_raw_mtm <= 0:
         return np.nan, np.nan
-    length_g = ((2.0 ** 1.5) * d0_m2_ms / (GAMMA_RAD_MS_MT * g_raw_mtm)) ** (1.0 / 3.0)
-    length_d = np.sqrt(2.0 * d0_m2_ms * td_ms)
+    length_g = (d0_m2_ms / (GAMMA_RAD_MS_MT * g_raw_mtm)) ** (1.0 / 3.0)
+    length_d = np.sqrt(d0_m2_ms * td_ms)
     dimensionless_d = length_d / length_g
     dimensionless_cf = ((3.0 / 2.0) ** 0.25) * dimensionless_d ** (-0.5)
     length_cf_m = dimensionless_cf * length_g
-    tc_peak_ms = length_cf_m**2 / (2.0 * d0_m2_ms)
+    tc_peak_ms = length_cf_m**2 / d0_m2_ms
     return float(length_cf_m * 1e6), float(tc_peak_ms)
 
 
@@ -800,6 +821,7 @@ def fit_rest_contrasts(
             "N_high": n_high,
             "N_low": n_low,
             "D0_m2_ms": float(d0_m2_ms),
+            "lcf_convention": LCF_CONVENTION,
             "n_points": int(len(y)),
             "ok": False,
             "message": "",
@@ -872,6 +894,7 @@ def fit_rest_contrasts(
                     "g_peak_corr_mTm": g_peak_corr,
                     "g_peak_raw_mTm": g_peak_raw,
                     "lcf_peak_um": lcf_peak_um,
+                    "tau_f_peak_ms": tc_peak_ms,
                     "tc_peak_ms": tc_peak_ms,
                 }
             )
@@ -907,7 +930,9 @@ def model_curve_for_fit(fit_row: Mapping[str, object], *, grid_size: int = 500) 
             "fraction": fraction,
             "g_high_raw": g_high_raw,
             "g_high_corr": g_high_corr,
+            "lcf_convention": LCF_CONVENTION,
             "lcf_um": [value[0] for value in axes],
+            "tau_f_axis_ms": [value[1] for value in axes],
             "tc_axis_ms": [value[1] for value in axes],
             "contrast_fit": np.asarray(values, dtype=float),
         }
@@ -1003,7 +1028,12 @@ def fit_tc_pseudohuber(
     c_bounds_ms: tuple[float, float] = (0.0, 10.0),
     delta_bounds_ms: tuple[float, float] = (1e-6, 10000.0),
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Fit peak correlation time versus diffusion time with fixed alpha macro."""
+    """Fit peak-derived filter time versus diffusion time with fixed alpha macro.
+
+    ``tc_peak_ms`` is retained as a legacy internal column name. Its value is
+    the convention-invariant ``tau_f_peak_ms`` derived from the filter axis,
+    not either branch's fitted signal-model correlation time.
+    """
 
     keys = ["variant", "subj", "roi", "direction"]
     valid = contrast_fits[contrast_fits["ok"].fillna(False)].copy()
@@ -1088,12 +1118,26 @@ def merge_alpha_delta(alpha_aggregated: pd.DataFrame, tc_summary: pd.DataFrame) 
     return alpha_aggregated.merge(tc_summary[available], on=keys, how="inner", validate="one_to_one")
 
 
-def _save_figure(fig: plt.Figure, output_path: str | Path | None, *, dpi: int = 300) -> None:
+def save_figure_formats(fig: plt.Figure, output_path: str | Path | None, *, dpi: int = 300) -> None:
+    """Save every requested figure as matched PNG and PDF files."""
+
     if output_path is None:
         return
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")
+    paths = [output_path.with_suffix(".png"), output_path.with_suffix(".pdf")]
+    for path in paths:
+        save_options: dict[str, object] = {
+            "bbox_inches": "tight",
+            "facecolor": "white",
+        }
+        if path.suffix.lower() == ".png":
+            save_options["dpi"] = int(dpi)
+        fig.savefig(path, **save_options)
+
+
+def _save_figure(fig: plt.Figure, output_path: str | Path | None, *, dpi: int = 300) -> None:
+    save_figure_formats(fig, output_path, dpi=dpi)
 
 
 def _resolve_example(
@@ -1287,7 +1331,10 @@ def plot_signal_contrast_example(
         else:
             contrast_ax.legend()
     sheet_label = f" | {sheet}" if sheet is not None else ""
-    fig.suptitle(f"{subject}{sheet_label} | {roi} | {direction} | $T_D$={td_ms:g} ms", fontsize=14)
+    fig.suptitle(
+        f"Subject: {subject}{sheet_label} | {roi} | {direction} | $T_D$={td_ms:g} ms",
+        fontsize=14,
+    )
     fig.tight_layout()
     _save_figure(fig, output_path, dpi=dpi)
     return fig
@@ -1354,8 +1401,9 @@ def export_all_signal_contrast_panels(
     }
     output_dir = Path(output_dir)
     if clean_output and output_dir.exists():
-        for previous_figure in output_dir.rglob("*.png"):
-            previous_figure.unlink()
+        for suffix in ("*.png", "*.pdf"):
+            for previous_figure in output_dir.rglob(suffix):
+                previous_figure.unlink()
         previous_manifest = output_dir / "manifest.csv"
         if previous_manifest.exists():
             previous_manifest.unlink()
@@ -1422,6 +1470,8 @@ def export_all_signal_contrast_panels(
                 "missing_or_failed_variants": "|".join(missing_or_failed),
                 "all_selected_variants_successful": not missing_or_failed,
                 "figure_path": str(figure_path.relative_to(output_dir)),
+                "figure_png_path": str(figure_path.relative_to(output_dir)),
+                "figure_pdf_path": str(figure_path.with_suffix(".pdf").relative_to(output_dir)),
             }
         )
         completed = index + 1
@@ -1443,11 +1493,13 @@ def plot_contrast_lcf_grid(
     subject: str | None,
     roi: str | None = None,
     directions: Sequence[str] = DEFAULT_DIRECTIONS,
-    lcf_limits_um: tuple[float, float] | None = (3.0, 12.0),
+    lcf_limits_um: tuple[float, float] | None = (2.5, 11.0),
+    free_diffusion_max: float = 0.46,
+    td_color_tolerance_ms: float = 8.0,
     output_path: str | Path | None = None,
     dpi: int = 300,
 ) -> plt.Figure:
-    """Plot Figure 2-style contrast curves with peak-time insets."""
+    """Plot NOGSE contrast curves using the reference Figure 2 style."""
 
     subject, roi, _, _ = _resolve_example(
         contrast,
@@ -1456,73 +1508,395 @@ def plot_contrast_lcf_grid(
         direction=str(directions[0]),
         td_ms=None,
     )
-    fig, axes = plt.subplots(
-        len(variants),
-        len(directions),
-        figsize=(6.4 * len(directions), 4.8 * len(variants)),
-        squeeze=False,
-        sharex=True,
-        sharey=True,
-    )
-    all_td = sorted(pd.to_numeric(contrast["td_ms"], errors="coerce").dropna().unique())
-    colors = {td: plt.cm.viridis(index / max(1, len(all_td) - 1)) for index, td in enumerate(all_td)}
-    for row_index, variant in enumerate(variants):
-        for column_index, direction in enumerate(directions):
-            ax = axes[row_index, column_index]
-            fits = contrast_fits[
-                contrast_fits["variant"].eq(variant)
-                & contrast_fits["subj"].eq(subject)
-                & contrast_fits["roi"].eq(roi)
-                & contrast_fits["direction"].eq(direction)
-                & contrast_fits["ok"].fillna(False)
-            ].sort_values("td_ms")
-            for fit_row in fits.itertuples(index=False):
-                td_value = float(fit_row.td_ms)
-                color = colors[td_value]
-                curve = contrast[
-                    contrast["variant"].eq(variant)
-                    & contrast["subj"].eq(subject)
-                    & contrast["roi"].eq(roi)
-                    & contrast["direction"].eq(direction)
-                    & np.isclose(pd.to_numeric(contrast["td_ms"], errors="coerce"), td_value)
-                ].copy()
-                curve = curve[np.isfinite(curve["lcf_um"])].sort_values("lcf_um")
-                ax.plot(curve["lcf_um"], curve["contrast"], color=color, label=f"{td_value:g} ms")
-            ax.set_title(f"{variant} | {direction}")
-            ax.set_xlabel(r"Center filter length $l_{c,f}$ [$\mu$m]")
-            ax.set_ylabel("OGSE contrast")
-            ax.grid(alpha=0.25)
-            if lcf_limits_um is not None:
-                ax.set_xlim(*lcf_limits_um)
-            if len(fits):
-                ax.legend(title=r"$T_D$", fontsize=8, loc="lower left", frameon=False)
 
-            inset = ax.inset_axes([0.58, 0.55, 0.38, 0.38])
-            data = tc_data[
-                tc_data["variant"].eq(variant)
-                & tc_data["subj"].eq(subject)
-                & tc_data["roi"].eq(roi)
-                & tc_data["direction"].eq(direction)
-            ]
-            inset.plot(data["td_ms"], data["tc_peak_ms"], "o", color="black", markersize=3)
-            summary = tc_summary[
-                tc_summary["variant"].eq(variant)
-                & tc_summary["subj"].eq(subject)
-                & tc_summary["roi"].eq(roi)
-                & tc_summary["direction"].eq(direction)
-                & tc_summary["ok"].fillna(False)
-            ]
-            if not summary.empty and len(data):
-                row = summary.iloc[0]
-                grid = np.linspace(float(data["td_ms"].min()), float(data["td_ms"].max()), 200)
-                inset.plot(grid, _tc_pseudohuber(grid, row["c_ms"], row["delta_ms"], row["alpha_macro"]), color="black")
-            inset.set_xlabel(r"$T_D$", fontsize=7)
-            inset.set_ylabel(r"$\tau_c$", fontsize=7)
-            inset.tick_params(labelsize=7)
-            inset.grid(alpha=0.2)
-    fig.suptitle(f"{subject} | {roi}: NOGSE-like contrast and transition fits", fontsize=15)
-    fig.tight_layout()
+    # Colors sampled from the reference figure.
+    td_colors = {
+        75.0: "#E69F00",
+        90.0: "#576D88",
+        120.0: "#E98439",
+        143.4: "#A0B17A",
+        210.0: "#B64A5C",
+    }
+
+    def get_td_color(td_value: float) -> str:
+        td_ref = min(td_colors, key=lambda reference: abs(float(td_value) - reference))
+        if abs(float(td_value) - td_ref) <= float(td_color_tolerance_ms):
+            return td_colors[td_ref]
+        return "#555555"
+
+    def format_td(td_value: float) -> str:
+        if np.isclose(td_value, round(td_value)):
+            return f"{int(round(td_value))}"
+        return f"{td_value:g}"
+
+    n_rows = len(variants)
+    n_cols = len(directions)
+
+    figure_width = 4.8 * n_cols
+    figure_height = 4.35 if n_rows == 1 else 4.35 + 3.15 * (n_rows - 1)
+
+    style = {
+        "font.family": "DejaVu Sans",
+        "mathtext.fontset": "dejavusans",
+        "axes.facecolor": "white",
+        "figure.facecolor": "white",
+        "savefig.facecolor": "white",
+        "axes.edgecolor": "#AFAFAF",
+        "axes.linewidth": 0.8,
+        "xtick.color": "#333333",
+        "ytick.color": "#333333",
+        "axes.axisbelow": True,
+    }
+
+    with mpl.rc_context(style):
+
+        fig, axes = plt.subplots(
+            n_rows,
+            n_cols,
+            figsize=(figure_width, figure_height),
+            squeeze=False,
+            sharex=False,
+            sharey=False,
+            constrained_layout=False,
+        )
+
+        fig.subplots_adjust(
+            left=0.075,
+            right=0.985,
+            bottom=0.285 if n_rows == 1 else 0.18,
+            top=0.925 if n_rows == 1 else 0.95,
+            wspace=0.30,
+            hspace=0.45,
+        )
+
+        all_td = sorted(
+            pd.to_numeric(
+                contrast["td_ms"],
+                errors="coerce",
+            ).dropna().unique()
+        )
+
+        for row_index, variant in enumerate(variants):
+            for column_index, direction in enumerate(directions):
+
+                ax = axes[row_index, column_index]
+
+                fits = contrast_fits[
+                    contrast_fits["variant"].eq(variant)
+                    & contrast_fits["subj"].eq(subject)
+                    & contrast_fits["roi"].eq(roi)
+                    & contrast_fits["direction"].eq(direction)
+                    & contrast_fits["ok"].fillna(False)
+                ].copy()
+
+                fits["td_ms"] = pd.to_numeric(
+                    fits["td_ms"],
+                    errors="coerce",
+                )
+                fits = fits.sort_values("td_ms")
+
+                for fit_row in fits.itertuples(index=False):
+
+                    td_value = float(fit_row.td_ms)
+                    color = get_td_color(td_value)
+
+                    td_numeric = pd.to_numeric(
+                        contrast["td_ms"],
+                        errors="coerce",
+                    )
+
+                    curve = contrast[
+                        contrast["variant"].eq(variant)
+                        & contrast["subj"].eq(subject)
+                        & contrast["roi"].eq(roi)
+                        & contrast["direction"].eq(direction)
+                        & np.isclose(td_numeric, td_value)
+                    ].copy()
+
+                    curve["lcf_um"] = pd.to_numeric(
+                        curve["lcf_um"],
+                        errors="coerce",
+                    )
+                    curve["contrast"] = pd.to_numeric(
+                        curve["contrast"],
+                        errors="coerce",
+                    )
+
+                    curve = curve[
+                        np.isfinite(curve["lcf_um"])
+                        & np.isfinite(curve["contrast"])
+                    ].sort_values("lcf_um")
+
+                    ax.plot(
+                        curve["lcf_um"],
+                        curve["contrast"],
+                        color=color,
+                        linewidth=1.35,
+                        marker="o",
+                        markersize=1.5,
+                        markeredgewidth=0,
+                        solid_capstyle="round",
+                        zorder=3,
+                    )
+
+                # Reference maximum.
+                ax.axhline(
+                    free_diffusion_max,
+                    color="#333333",
+                    linewidth=0.9,
+                    linestyle=(0, (4, 3)),
+                    zorder=2,
+                )
+
+                # Main-axis geometry.
+                if lcf_limits_um is not None:
+                    ax.set_xlim(*lcf_limits_um)
+
+                ax.set_ylim(0.0, 0.5)
+
+                if lcf_limits_um is not None:
+                    tick_start = np.ceil(lcf_limits_um[0])
+                    tick_stop = np.floor(lcf_limits_um[1])
+                    ax.set_xticks(np.arange(tick_start, tick_stop + 0.1, 1.0))
+                ax.set_yticks(np.arange(0.0, 0.51, 0.1))
+
+                ax.tick_params(
+                    axis="both",
+                    which="major",
+                    labelsize=9,
+                    length=3.0,
+                    width=0.7,
+                    color="#777777",
+                    pad=2,
+                )
+
+                ax.grid(
+                    True,
+                    which="major",
+                    color="#E5E5E5",
+                    linewidth=0.6,
+                    alpha=0.65,
+                )
+
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+
+                ax.spines["left"].set_color("#AFAFAF")
+                ax.spines["bottom"].set_color("#AFAFAF")
+
+                ax.spines["left"].set_linewidth(0.8)
+                ax.spines["bottom"].set_linewidth(0.8)
+
+                variant_label = str(variant).upper()
+
+                ax.set_title(
+                    f"{variant_label} | {roi} | {direction}",
+                    fontsize=12,
+                    fontweight="normal",
+                    pad=2,
+                )
+
+                ax.set_xlabel(
+                    r"Center filter length $l_{cf}$ [$\mu$m]",
+                    fontsize=14,
+                    labelpad=1,
+                )
+
+                ax.set_ylabel(
+                    "NOGSE contrast",
+                    fontsize=14,
+                    labelpad=6,
+                )
+
+                # Transition-time inset.
+                inset = ax.inset_axes(
+                    [0.64, 0.54, 0.33, 0.38],
+                    zorder=10,
+                )
+
+                inset.set_facecolor("white")
+
+                data = tc_data[
+                    tc_data["variant"].eq(variant)
+                    & tc_data["subj"].eq(subject)
+                    & tc_data["roi"].eq(roi)
+                    & tc_data["direction"].eq(direction)
+                ].copy()
+
+                data["td_ms"] = pd.to_numeric(
+                    data["td_ms"],
+                    errors="coerce",
+                )
+                data["tc_peak_ms"] = pd.to_numeric(
+                    data["tc_peak_ms"],
+                    errors="coerce",
+                )
+
+                data = data[
+                    np.isfinite(data["td_ms"])
+                    & np.isfinite(data["tc_peak_ms"])
+                ].sort_values("td_ms")
+
+                summary = tc_summary[
+                    tc_summary["variant"].eq(variant)
+                    & tc_summary["subj"].eq(subject)
+                    & tc_summary["roi"].eq(roi)
+                    & tc_summary["direction"].eq(direction)
+                    & tc_summary["ok"].fillna(False)
+                ]
+
+                if not summary.empty and len(data):
+
+                    row = summary.iloc[0]
+
+                    fit_grid = np.linspace(
+                        float(data["td_ms"].min()),
+                        float(data["td_ms"].max()),
+                        300,
+                    )
+
+                    inset.plot(
+                        fit_grid,
+                        _tc_pseudohuber(
+                            fit_grid,
+                            row["c_ms"],
+                            row["delta_ms"],
+                            row["alpha_macro"],
+                        ),
+                        color="#222222",
+                        linewidth=1.15,
+                        zorder=2,
+                    )
+
+                # Each inset point uses the same color as its TD curve.
+                for point in data.itertuples(index=False):
+
+                    td_value = float(point.td_ms)
+
+                    inset.plot(
+                        td_value,
+                        float(point.tc_peak_ms),
+                        marker="o",
+                        linestyle="none",
+                        markersize=5.3,
+                        markerfacecolor=get_td_color(td_value),
+                        markeredgecolor=get_td_color(td_value),
+                        markeredgewidth=0.0,
+                        zorder=4,
+                    )
+
+                if len(data):
+                    td_min = float(data["td_ms"].min())
+                    td_max = float(data["td_ms"].max())
+                    td_padding = max(5.0, 0.06 * (td_max - td_min))
+                    inset.set_xlim(td_min - td_padding, td_max + td_padding)
+                inset.xaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
+
+                inset.yaxis.set_major_locator(
+                    MaxNLocator(nbins=4)
+                )
+
+                inset.tick_params(
+                    axis="both",
+                    which="major",
+                    labelsize=7,
+                    length=2.5,
+                    width=0.6,
+                    color="#777777",
+                    pad=1.5,
+                )
+
+                inset.set_xlabel(
+                    r"$T_D$ [ms]",
+                    fontsize=12,
+                    labelpad=-1,
+                )
+
+                inset.set_ylabel(
+                    r"$\tau_{f,\mathrm{peak}}$ [ms]",
+                    fontsize=12,
+                    labelpad=1,
+                )
+
+                inset.grid(
+                    True,
+                    which="major",
+                    color="#E5E5E5",
+                    linewidth=0.55,
+                    alpha=0.65,
+                )
+
+                inset.spines["top"].set_visible(False)
+                inset.spines["right"].set_visible(False)
+
+                inset.spines["left"].set_color("#999999")
+                inset.spines["bottom"].set_color("#999999")
+
+                inset.spines["left"].set_linewidth(0.7)
+                inset.spines["bottom"].set_linewidth(0.7)
+
+        # Global legend matching the two-row layout of the reference figure.
+        present_td = [
+            td
+            for td in all_td
+            if min(abs(float(td) - key) for key in td_colors) <= float(td_color_tolerance_ms)
+        ]
+
+        maximum_handle = Line2D(
+            [],
+            [],
+            color="#333333",
+            linewidth=1.0,
+            linestyle=(0, (5, 4)),
+            label="Free diffusion (macroscopic tortuosity) expected maximum",
+        )
+
+        td_handles = [
+            Line2D(
+                [],
+                [],
+                color=get_td_color(float(td)),
+                linewidth=1.3,
+                marker="o",
+                markersize=2.3,
+                markeredgewidth=0,
+                label=format_td(float(td)),
+            )
+            for td in present_td
+        ]
+
+        td_legend = fig.legend(
+            handles=td_handles,
+            title=r"$T_D$ [ms]",
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.075 if n_rows == 1 else 0.035),
+            ncol=max(1, len(td_handles)),
+            fontsize=10,
+            frameon=True,
+            fancybox=True,
+            framealpha=1.0,
+            facecolor="white",
+            edgecolor="#D0D0D0",
+            borderpad=0.3,
+            labelspacing=0.2,
+            handlelength=1.5,
+            handletextpad=0.45,
+            columnspacing=1.0,
+        )
+        td_legend.get_frame().set_linewidth(0.8)
+
+        maximum_legend = fig.legend(
+            handles=[maximum_handle],
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.005 if n_rows == 1 else -0.005),
+            fontsize=9,
+            frameon=False,
+            handlelength=2.4,
+            handletextpad=0.6,
+        )
+
     _save_figure(fig, output_path, dpi=dpi)
+
     return fig
 
 
@@ -1535,7 +1909,8 @@ def export_all_contrast_lcf_panels(
     variants: Sequence[str],
     directions: Sequence[str],
     output_dir: str | Path,
-    lcf_limits_um: tuple[float, float] | None = (3.0, 12.0),
+    lcf_limits_um: tuple[float, float] | None = (2.5, 11.0),
+    td_color_tolerance_ms: float = 8.0,
     dpi: int = 180,
     progress_every: int = 10,
     clean_output: bool = True,
@@ -1561,8 +1936,9 @@ def export_all_contrast_lcf_panels(
     combinations = candidates[keys].drop_duplicates().sort_values(keys, kind="stable").reset_index(drop=True)
     output_dir = Path(output_dir)
     if clean_output and output_dir.exists():
-        for previous_figure in output_dir.rglob("*.png"):
-            previous_figure.unlink()
+        for suffix in ("*.png", "*.pdf"):
+            for previous_figure in output_dir.rglob(suffix):
+                previous_figure.unlink()
         previous_manifest = output_dir / "manifest.csv"
         if previous_manifest.exists():
             previous_manifest.unlink()
@@ -1616,6 +1992,7 @@ def export_all_contrast_lcf_panels(
             roi=roi,
             directions=selected_directions,
             lcf_limits_um=lcf_limits_um,
+            td_color_tolerance_ms=td_color_tolerance_ms,
             output_path=figure_path,
             dpi=dpi,
         )
@@ -1631,6 +2008,8 @@ def export_all_contrast_lcf_panels(
                 "missing_or_failed_variants": "|".join(missing_or_failed),
                 "all_selected_variants_successful": not missing_or_failed,
                 "figure_path": str(figure_path.relative_to(output_dir)),
+                "figure_png_path": str(figure_path.relative_to(output_dir)),
+                "figure_pdf_path": str(figure_path.with_suffix(".pdf").relative_to(output_dir)),
             }
         )
         completed = index + 1

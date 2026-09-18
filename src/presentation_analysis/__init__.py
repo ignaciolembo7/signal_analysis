@@ -20,6 +20,7 @@ from .abstract_figures import (
     plot_contrast_lcf_grid,
     plot_metric_comparison,
     plot_signal_contrast_example,
+    save_figure_formats,
     summarize_contrast_shape,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "plot_contrast_lcf_grid",
     "plot_metric_comparison",
     "plot_signal_contrast_example",
+    "save_figure_formats",
     "summarize_contrast_shape",
 ]

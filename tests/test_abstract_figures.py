@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -14,6 +15,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from presentation_analysis.abstract_figures import (  # noqa: E402
+    GAMMA_RAD_MS_MT,
+    _derived_peak_axes,
     _resolve_example,
     _tc_pseudohuber,
     build_contrast_table,
@@ -24,12 +27,83 @@ from presentation_analysis.abstract_figures import (  # noqa: E402
     fit_tc_pseudohuber,
     load_alpha_summaries,
     normalize_alpha_to_internal_reference,
+    plot_contrast_lcf_grid,
     summarize_contrast_shape,
 )
 from models.model_fitting import M_ogse_rest_offset  # noqa: E402
 
 
 class AbstractFigureAnalysisTests(unittest.TestCase):
+    def test_derived_peak_axes_use_capiglioni_filter_length(self) -> None:
+        td_ms = 143.4
+        gradient_mtm = 35.0
+        d0_m2_ms = 3.2e-12
+
+        lcf_um, tau_f_ms = _derived_peak_axes(td_ms, gradient_mtm, d0_m2_ms)
+        expected_lcf_m = (
+            1.5 * d0_m2_ms / (GAMMA_RAD_MS_MT**2 * gradient_mtm**2 * td_ms)
+        ) ** 0.25
+
+        self.assertAlmostEqual(lcf_um, expected_lcf_m * 1e6)
+        self.assertAlmostEqual(tau_f_ms, expected_lcf_m**2 / d0_m2_ms)
+
+    def test_old_phantom_diffusion_times_use_colored_palette(self) -> None:
+        diffusion_times = [75.1, 97.1, 119.1, 142.5, 209.1]
+        contrast_rows = []
+        fit_rows = []
+        tc_rows = []
+        for td_ms in diffusion_times:
+            fit_rows.append(
+                {
+                    "variant": "manual",
+                    "subj": "P1",
+                    "roi": "fiber1",
+                    "direction": "long",
+                    "td_ms": td_ms,
+                    "ok": True,
+                }
+            )
+            tc_rows.append(
+                {
+                    "variant": "manual",
+                    "subj": "P1",
+                    "roi": "fiber1",
+                    "direction": "long",
+                    "td_ms": td_ms,
+                    "tc_peak_ms": 5.0 + td_ms / 100.0,
+                }
+            )
+            for lcf_um in (3.5, 5.0, 8.0):
+                contrast_rows.append(
+                    {
+                        "variant": "manual",
+                        "subj": "P1",
+                        "roi": "fiber1",
+                        "direction": "long",
+                        "td_ms": td_ms,
+                        "lcf_um": lcf_um,
+                        "contrast": 0.2,
+                    }
+                )
+
+        figure = plot_contrast_lcf_grid(
+            pd.DataFrame(contrast_rows),
+            pd.DataFrame(fit_rows),
+            pd.DataFrame(tc_rows),
+            pd.DataFrame(
+                columns=["variant", "subj", "roi", "direction", "ok", "c_ms", "delta_ms", "alpha_macro"]
+            ),
+            variants=["manual"],
+            subject="P1",
+            roi="fiber1",
+            directions=["long"],
+        )
+        curve_colors = [line.get_color() for line in figure.axes[0].lines[: len(diffusion_times)]]
+        plt.close(figure)
+
+        self.assertNotIn("#555555", curve_colors)
+        self.assertEqual(len(set(curve_colors)), len(diffusion_times))
+
     def test_alpha_loader_harmonizes_reference_and_prefers_direct_direction(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             alpha_path = Path(temporary_directory) / "summary.xlsx"
@@ -242,6 +316,7 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
             legacy_directory = output_dir / "sub-old" / "sheet-old" / "roi-old" / "dir-old"
             legacy_directory.mkdir(parents=True)
             (legacy_directory / "td-90ms.png").touch()
+            (legacy_directory / "td-90ms.pdf").touch()
             (legacy_directory / "Thumbs.db").touch()
             (output_dir / "manifest.csv").touch()
             failed_variant = summary.iloc[[0]].copy()
@@ -271,6 +346,7 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
                 ),
             )
             self.assertTrue(figure_path.is_file())
+            self.assertTrue(figure_path.with_suffix(".pdf").is_file())
             self.assertTrue((output_dir / "manifest.csv").is_file())
             self.assertFalse((output_dir / "sub-old").exists())
 
@@ -278,6 +354,7 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
             stale_directory = lcf_output_dir / "sub-old"
             stale_directory.mkdir(parents=True)
             (stale_directory / "old.png").touch()
+            (stale_directory / "old.pdf").touch()
             tc_data = summary.loc[:, ["variant", "subj", "roi", "direction", "td_ms", "tc_peak_ms"]].copy()
             tc_summary = pd.DataFrame(
                 columns=["variant", "subj", "roi", "direction", "ok", "c_ms", "delta_ms", "alpha_macro"]
@@ -301,6 +378,7 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
                 ("sub-P1", "roi-fiber1__contrast-vs-filtered-length.png"),
             )
             self.assertTrue(lcf_figure_path.is_file())
+            self.assertTrue(lcf_figure_path.with_suffix(".pdf").is_file())
             self.assertTrue((lcf_output_dir / "manifest.csv").is_file())
             self.assertFalse((lcf_output_dir / "sub-old").exists())
 
