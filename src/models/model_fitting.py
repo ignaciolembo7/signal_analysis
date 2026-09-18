@@ -278,7 +278,7 @@ def M_ogse_rest(TE, G, N, x, tc, M0, D0):
     return M0 * np.exp(-phi_SE) * np.exp(-phi_N) * np.exp(phi_cross)
 
 
-def M_ogse_rest_offset(TE, G, N, x, tc, M0, D0, C):
+def M_ogse_rest_rician(TE, G, N, x, tc, M0, D0, C):
     clean_signal = M_ogse_rest(TE, G, N, x, tc, M0, D0)
     return np.sqrt(clean_signal**2 + C**2) / np.sqrt(1 + C**2)
 
@@ -304,8 +304,8 @@ def OGSE_contrast_vs_g_rest(TE, G1, G2, N1, N2, tc, M0, D0):
     return M_ogse_rest(TE, G1, N1, TE / N1, tc, M0, D0) - M_ogse_rest(TE, G2, N2, TE / N2, tc, M0, D0)
 
 
-def OGSE_contrast_vs_g_rest_offset(TE, G1, G2, N1, N2, tc, M0, D0, C):
-    return M_ogse_rest_offset(TE, G1, N1, TE / N1, tc, M0, D0, C) - M_ogse_rest_offset(TE, G2, N2, TE / N2, tc, M0, D0, C)
+def OGSE_contrast_vs_g_rest_rician(TE, G1, G2, N1, N2, tc, M0, D0, C):
+    return M_ogse_rest_rician(TE, G1, N1, TE / N1, tc, M0, D0, C) - M_ogse_rest_rician(TE, G2, N2, TE / N2, tc, M0, D0, C)
 
 
 def OGSE_contrast_vs_g_tort(TE, G1, G2, N1, N2, alpha, M0, D0):

@@ -18,7 +18,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 from scipy.optimize import least_squares
 
-from models.model_fitting import M_ogse_rest_offset, OGSE_contrast_vs_g_rest
+from models.model_fitting import M_ogse_rest_rician, OGSE_contrast_vs_g_rest
 
 
 CC_ROIS = ("AntCC", "MidAntCC", "CentralCC", "MidPostCC", "PostCC")
@@ -516,7 +516,7 @@ def build_resampled_contrasts(
 
         def predict(g_corr: np.ndarray, n_value: int, tc_ms: float, c_value: float) -> np.ndarray:
             return np.asarray(
-                M_ogse_rest_offset(
+                M_ogse_rest_rician(
                     td_ms,
                     g_corr,
                     int(n_value),
@@ -1277,7 +1277,7 @@ def plot_signal_contrast_example(
                 fit_row = fit.iloc[0]
                 tc_column = "tc_high_ms" if n_value == n_high else "tc_low_ms"
                 fit_grid = np.linspace(0.0, float(np.nanmax(x)), 500)
-                fit_values = M_ogse_rest_offset(
+                fit_values = M_ogse_rest_rician(
                     td_ms,
                     fit_grid,
                     n_value,

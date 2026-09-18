@@ -30,7 +30,7 @@ from presentation_analysis.abstract_figures import (  # noqa: E402
     plot_contrast_lcf_grid,
     summarize_contrast_shape,
 )
-from models.model_fitting import M_ogse_rest_offset  # noqa: E402
+from models.model_fitting import M_ogse_rest_rician  # noqa: E402
 
 
 class AbstractFigureAnalysisTests(unittest.TestCase):
@@ -262,7 +262,7 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
         }
         rows = []
         for n_value, (gradients, tc_ms) in branches.items():
-            signals = M_ogse_rest_offset(
+            signals = M_ogse_rest_rician(
                 td_ms,
                 gradients,
                 n_value,
@@ -389,7 +389,7 @@ class AbstractFigureAnalysisTests(unittest.TestCase):
         rows = []
         for n_value, maximum_gradient in [(8, 70.0), (4, 55.0)]:
             gradients = np.linspace(0.0, maximum_gradient, 10)
-            signals = M_ogse_rest_offset(
+            signals = M_ogse_rest_rician(
                 td_ms,
                 gradients,
                 n_value,
