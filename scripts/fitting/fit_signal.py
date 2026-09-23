@@ -161,7 +161,14 @@ def main() -> None:
     ap.add_argument("--D0-init", "--D0_init", dest="D0_init", type=float, default=0.0023)
 
     corr_group = ap.add_mutually_exclusive_group()
-    corr_group.add_argument("--apply-grad-corr", "--apply_grad_corr", dest="apply_grad_corr", action="store_true")
+    corr_group.add_argument(
+        "--apply-grad-corr", "--apply_grad_corr", dest="apply_grad_corr", action="store_true",
+        help=(
+            "Scale the gradient axis g by grad_correction_factor. Only used by --model ogse_free "
+            "(OGSE/NOGSE signal model vs g). Monoexponential fits use the scanner b-value, which needs "
+            "no correction: the factor is only reported for them."
+        ),
+    )
     corr_group.add_argument("--no-grad-corr", "--no_grad_corr", dest="no_grad_corr", action="store_true")
 
     m0_group = ap.add_mutually_exclusive_group()
@@ -174,6 +181,11 @@ def main() -> None:
     ap.add_argument("--append-fit-points-to-master", action="store_true")
     add_master_source_args(ap, default_row_kind="signal_rotated", include_stat=False, include_td_ms=False, include_N=False)
     args = ap.parse_args()
+    if args.model != "ogse_free" and bool(args.apply_grad_corr):
+        print(
+            "NOTE: --apply_grad_corr does not change monoexponential fits: they use the scanner b-value, "
+            "which is already the applied b. grad_correction_factor is reported in the output (f_corr) only."
+        )
 
     if args.fit_points is not None and args.fit_points <= 0:
         raise ValueError("--fit-points must be > 0.")

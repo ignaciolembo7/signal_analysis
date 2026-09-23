@@ -366,7 +366,7 @@ GRAD_CORR_EXTRA_ARGS="--avg-N --no-fill-missing" \
 | `plot_signal_rotated` | Plot rotated, unnormalized signal curves |
 | `plot_signal_rotated_norm` | Plot rotated, normalized signal curves |
 | `fit_signal` | Fit monoexponential signal curves, with `auto_fit_points` by default |
-| `fit_signal_gradcorr` | Same as `fit_signal`, but applies embedded gradient-correction factors |
+| `fit_signal_gradcorr` | Same as `fit_signal`; reports the embedded gradient-correction factor (monoexp fits use the scanner b and are not corrected) |
 | `grad_correction` | Build and embed gradient-correction factors |
 | `alpha` | Build alpha_macro summaries and D-vs-Delta plots |
 | `plot_monoexp_d` | Plot monoexponential D vs `td_ms` or `Delta_app_ms` |
@@ -743,8 +743,13 @@ nohup bash signal_analysis/run_dataset.sh brain ogse fit_signal_gradcorr \
   > logs/04_fit_signal_gradcorr.log 2>&1 &
 ```
 
-That preset is equivalent to adding `--apply_grad_corr`; it scales the b-axis
-by `correction_factor^2` before fitting. For OGSE it also defaults to
+That preset is equivalent to adding `--apply_grad_corr`. The gradient-correction
+factor rescales the gradient axis `g` so that the ideal OGSE/NOGSE signal models
+(square lobes of duration TD/N) reproduce the b-value the scanner applied with its
+real waveform; it is therefore used only when fitting those models against `g`
+(`fit_ogse_free_signal_gradcorr`, contrasts). A monoexponential fit uses the scanner
+b-value directly, which is already the applied b, so it is never corrected: the
+factor is only reported in the output (`f_corr`, `grad_correction_applied=False`). For OGSE it also defaults to
 `--directions long tra` unless a direction filter is already present, because
 the gradient-correction table is normally defined only for those rotated
 directions.

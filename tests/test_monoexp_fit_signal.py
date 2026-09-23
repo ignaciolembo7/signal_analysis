@@ -114,9 +114,11 @@ class MonoexpFitSignalTests(unittest.TestCase):
         self.assertEqual(int(outputs.fit_params.loc[0, "fit_points"]), 4)
         self.assertEqual(int(outputs.fit_points["used_for_fit"].sum()), 4)
 
-    def test_fit_signal_uses_group_gradient_correction_factor(self) -> None:
+    def test_fit_signal_never_scales_scanner_b_with_gradient_correction(self) -> None:
+        # The scanner b-value is already the applied b: grad_correction_factor only rescales g for
+        # OGSE/NOGSE model fits, so a monoexponential fit must ignore it (and only report it).
         b = np.array([0.0, 100.0, 200.0, 300.0])
-        y = monoexp(b * 4.0, 1.0, 0.0023)
+        y = monoexp(b, 1.0, 0.0023)
         df = pd.DataFrame(
             {
                 "subj": ["S1"] * len(b),
@@ -146,9 +148,12 @@ class MonoexpFitSignalTests(unittest.TestCase):
 
         self.assertTrue(bool(outputs.fit_params.loc[0, "ok"]))
         self.assertAlmostEqual(float(outputs.fit_params.loc[0, "D0_mm2_s"]), 0.0023, places=6)
-        self.assertEqual(outputs.fit_points["bvalue_used"].tolist(), (b * 4.0).tolist())
+        self.assertEqual(outputs.fit_points["bvalue_used"].tolist(), b.tolist())
+        self.assertAlmostEqual(float(outputs.fit_params.loc[0, "f_corr"]), 2.0)
+        self.assertFalse(bool(outputs.fit_params.loc[0, "grad_correction_applied"]))
+        self.assertAlmostEqual(float(outputs.fit_params.loc[0, "b_corr_scale"]), 1.0)
 
-    def test_fit_signal_marks_curve_failed_when_gradient_correction_factor_is_missing(self) -> None:
+    def test_missing_gradient_correction_factor_does_not_block_monoexp_fit(self) -> None:
         b = np.array([0.0, 100.0, 200.0, 300.0])
         y = monoexp(b, 1.0, 0.0023)
         df = pd.DataFrame(
@@ -171,15 +176,16 @@ class MonoexpFitSignalTests(unittest.TestCase):
         outputs = fit_signal_monoexp(
             df,
             b_axis="bvalue_thorsten",
-            auto_fit_points=True,
+            auto_fit_points=False,
+            fit_points=4,
             correction_factor_col="grad_correction_factor",
             fix_M0=1.0,
             D0_init=0.0023,
         )
 
-        self.assertFalse(bool(outputs.fit_params.loc[0, "ok"]))
-        self.assertIn("Missing grad_correction_factor", outputs.fit_params.loc[0, "msg"])
-        self.assertEqual(int(outputs.fit_points["used_for_fit"].sum()), 0)
+        self.assertTrue(bool(outputs.fit_params.loc[0, "ok"]))
+        self.assertAlmostEqual(float(outputs.fit_params.loc[0, "D0_mm2_s"]), 0.0023, places=6)
+        self.assertTrue(np.isnan(float(outputs.fit_params.loc[0, "f_corr"])))
 
 
 if __name__ == "__main__":

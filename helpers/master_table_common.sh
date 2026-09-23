@@ -636,6 +636,9 @@ Usage:
 What it does:
   Fits signal curves selected from master according to manifests/<type_subj>_<type_seq>/signal_fits.csv.
   fit_signal_gradcorr is a preset that adds --apply_grad_corr to every fit automatically.
+  For monoexponential fits this changes nothing: they use the scanner b-value, which is
+  already the applied b, so the factor is only reported (f_corr). The factor exists to
+  rescale g for the OGSE/NOGSE signal models (ideal square lobes vs the real waveform).
   fit_ogse_free_signal fits OGSE signal vs g with M_ogse_free; its gradcorr preset
   first scales g using the gradient-correction factor stored in the master table.
 
@@ -662,8 +665,10 @@ Useful SIGNAL_FIT_EXTRA_ARGS:
   Gradient correction
   -------------------
   --apply_grad_corr
-      Scale the gradient axis by the per-direction grad_correction_factor in master rows
-      before fitting. Requires grad_correction to have been run.
+      Scale the gradient axis g by the grad_correction_factor in master rows before
+      fitting an OGSE/NOGSE model (SIGNAL_FIT_MODEL=ogse_free). Monoexponential fits
+      use the scanner b-value and are never corrected (the factor is only reported).
+      Requires grad_correction to have been run.
       Equivalent to running fit_signal_gradcorr instead of fit_signal.
       Mutually exclusive with --no_grad_corr.
   --no_grad_corr
@@ -701,7 +706,7 @@ Examples:
   SIGNAL_FIT_EXTRA_ARGS="--auto_fit_points --auto_fit_tol 0.05" \
     bash signal_analysis/run_dataset.sh brain ogse fit_signal
 
-  # Monoexp with gradient correction
+  # Monoexp reporting the gradient-correction factor (the fit itself is not corrected)
   SIGNAL_FIT_EXTRA_ARGS="--apply_grad_corr --D0_init 0.0023" \
     bash signal_analysis/run_dataset.sh brain ogse fit_signal
 

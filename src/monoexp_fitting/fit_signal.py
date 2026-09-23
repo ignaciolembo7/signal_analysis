@@ -13,6 +13,16 @@ from fitting.core import CurveFitParameter, chi2, fit_curve_fit_parameters, r2_s
 from plotting.core import compact_float, render_xy_plot
 
 
+# Gradient correction is never applied to monoexponential fits.
+#
+# ``grad_correction_factor`` rescales the gradient axis ``g`` so that the ideal
+# OGSE/NOGSE signal models (square lobes of duration TD/N) reproduce the b-value
+# the scanner actually applied with its real waveform (cosine-modulated
+# trapezoids, ramps, gap around the refocusing pulse). A monoexponential fit is
+# done directly against that scanner b-value (``bvalue``/``bvalue_g``, or a b
+# rebuilt from ``g`` with the same scanner relation b = N*gamma^2*delta^2*g^2*Delta_app),
+# so it needs no correction; scaling it by factor^2 would correct twice.
+# The factor is still read (when requested) and reported, for provenance only.
 AUTO_FIT_MIN_POINTS = 3
 AUTO_FIT_MAX_POINTS = 9
 AUTO_FIT_REL_TOL = 0.05
@@ -77,9 +87,8 @@ def resolve_b_axis(
     N: float | None = None,
     delta_ms: float | None = None,
     Delta_app_ms: float | None = None,
-    correction_factor: float = 1.0,
 ) -> tuple[np.ndarray, str]:
-    """Return the monoexponential b axis in s/mm2."""
+    """Return the scanner b axis in s/mm2 (never gradient-corrected, see module note)."""
     base = normalize_axis_base(axis)
     b_col = BVALUE_AXIS_COLUMNS.get(base)
     if b_col is not None and b_col in df.columns:
@@ -106,9 +115,6 @@ def resolve_b_axis(
         )
         b_col = f"derived_from_{g_col}"
 
-    f_corr = float(correction_factor)
-    if np.isfinite(f_corr) and f_corr > 0.0 and not np.isclose(f_corr, 1.0):
-        b = b * (f_corr**2.0)
     return np.asarray(b, dtype=float), str(b_col)
 
 
@@ -446,42 +452,25 @@ def fit_signal_monoexp(
         g = group.sort_values("b_step", kind="stable").copy()
         direction = str(g["direction"].iloc[0]) if "direction" in g.columns else "NA"
         roi = str(g["roi"].iloc[0]) if "roi" in g.columns else "NA"
-        f_corr = float(f_by_direction.get(direction, 1.0)) if f_by_direction else 1.0
-        correction_msg = ""
+        # The gradient-correction factor is only reported here, never applied (see module note).
+        f_corr = float(f_by_direction.get(direction, np.nan)) if f_by_direction else np.nan
         if correction_factor_col:
-            f_corr, correction_msg = _correction_factor_from_group(g, correction_factor_col)
+            f_corr, _ = _correction_factor_from_group(g, correction_factor_col)
         y = pd.to_numeric(g[ycol], errors="coerce").to_numpy(dtype=float)
-        b, b_col = resolve_b_axis(
-            g,
-            axis=b_axis,
-            gamma=gamma,
-            correction_factor=f_corr if np.isfinite(f_corr) else 1.0,
+        b, b_col = resolve_b_axis(g, axis=b_axis, gamma=gamma)
+        result = select_monoexp_fit_result(
+            b,
+            y,
+            fit_points=fit_points,
+            auto_fit_points=auto_fit_points,
+            free_M0=free_M0,
+            fix_M0=fix_M0,
+            D0_init=D0_init,
+            auto_fit_min_points=auto_fit_min_points,
+            auto_fit_max_points=auto_fit_max_points,
+            auto_fit_rel_tol=auto_fit_rel_tol,
+            auto_fit_err_floor=auto_fit_err_floor,
         )
-        if correction_msg:
-            result = {
-                "ok": False,
-                "fit_points": np.nan,
-                "n_fit": 0,
-                "fit_mask": np.zeros(len(g), dtype=bool),
-                "fit_strategy": "auto" if auto_fit_points else "fixed",
-                "auto_fit_metric": "rmse_log" if auto_fit_points else np.nan,
-                "auto_fit_score": np.nan,
-                "msg": correction_msg,
-            }
-        else:
-            result = select_monoexp_fit_result(
-                b,
-                y,
-                fit_points=fit_points,
-                auto_fit_points=auto_fit_points,
-                free_M0=free_M0,
-                fix_M0=fix_M0,
-                D0_init=D0_init,
-                auto_fit_min_points=auto_fit_min_points,
-                auto_fit_max_points=auto_fit_max_points,
-                auto_fit_rel_tol=auto_fit_rel_tol,
-                auto_fit_err_floor=auto_fit_err_floor,
-            )
         fit_mask = np.asarray(result.get("fit_mask", np.zeros(len(g), dtype=bool)), dtype=bool)
         meta = _metadata_from_group(g, meta_cols)
         fit_points_value = result.get("fit_points", np.nan)
@@ -501,7 +490,8 @@ def fit_signal_monoexp(
             "auto_fit_metric": result.get("auto_fit_metric", np.nan),
             "auto_fit_score": result.get("auto_fit_score", np.nan),
             "f_corr": float(f_corr),
-            "b_corr_scale": float(f_corr) ** 2.0,
+            "grad_correction_applied": False,
+            "b_corr_scale": 1.0,
             "n_points": int(len(g)),
             "n_fit": int(result.get("n_fit", 0)),
             "ok": bool(result.get("ok", False)),

@@ -225,34 +225,22 @@ def build_axis_bundle(
     bvalue_corr: np.ndarray | None = None
 
     if axis_uses_bvalue(axis_base):
-        if N is None or delta_ms is None or Delta_app_ms is None:
-            if bvalue_raw is None:
+        if bvalue_raw is None:
+            if N is None or delta_ms is None or Delta_app_ms is None:
                 raise ValueError(
-                    f"Axis {axis!r} needs N, delta_ms, and Delta_app_ms to derive a corrected b-value."
+                    f"Axis {axis!r} needs N, delta_ms, and Delta_app_ms to derive a b-value."
                 )
-            if not np.isclose(float(f_corr), 1.0):
-                raise ValueError(
-                    f"Axis {axis!r} requested corrected b-values, but sequence timing parameters are missing."
-                )
-            bvalue_corr = np.asarray(bvalue_raw, dtype=float)
-        else:
-            if bvalue_raw is None:
-                bvalue_raw = bvalue_from_gradient(
-                    gradient_raw,
-                    axis=axis_base,
-                    N=N,
-                    gamma=gamma,
-                    delta_ms=delta_ms,
-                    Delta_app_ms=Delta_app_ms,
-                )
-            bvalue_corr = bvalue_from_gradient(
-                gradient_corr,
+            bvalue_raw = bvalue_from_gradient(
+                gradient_raw,
                 axis=axis_base,
                 N=N,
                 gamma=gamma,
                 delta_ms=delta_ms,
                 Delta_app_ms=Delta_app_ms,
             )
+        # A b-value axis is the b the scanner applied: the gradient-correction factor only
+        # rescales g for the OGSE/NOGSE signal models, so the b axis is never corrected.
+        bvalue_corr = np.asarray(bvalue_raw, dtype=float)
 
     axis_raw = np.asarray(bvalue_raw, dtype=float) if axis_uses_bvalue(axis_base) else np.asarray(gradient_raw, dtype=float)
     axis_corr = np.asarray(bvalue_corr, dtype=float) if axis_uses_bvalue(axis_base) else np.asarray(gradient_corr, dtype=float)
