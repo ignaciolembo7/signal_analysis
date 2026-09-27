@@ -171,6 +171,27 @@ class CleanSequenceParams:
         return out
 
 
+def grouped_direct_g_output_stem(params: CleanSequenceParams) -> str:
+    """Stable one-G curve name, independent of G and per-file sequence number."""
+
+    def part(name: str, value: object) -> str | None:
+        if value is None or (isinstance(value, float) and not np.isfinite(value)):
+            return None
+        text = str(value).strip()
+        return f"{name}-{text}" if text else None
+
+    parts = [
+        part("sheet", params.sheet),
+        part("subj", params.subj),
+        part("protocol", params.protocol),
+        part("group", params.group),
+        part("type", params.type),
+        part("N", params.N),
+        part("TN", params.TN),
+    ]
+    return sanitize_token("_".join(item for item in parts if item))
+
+
 def detect_gradient_input_kind(stats: dict[str, pd.DataFrame]) -> str:
     any_df = next(iter(stats.values()))
     cols = [str(c) for c in any_df.columns]

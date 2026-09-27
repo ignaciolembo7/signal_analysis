@@ -585,6 +585,13 @@ Use `NOGSE_ONEG=1` for direct-g NOGSE phantom results where each
 multi-point curve. This flag is only needed during `ingest`; later steps read
 the `one_g_per_sequence` marker from `master.long.parquet`.
 
+For direct-G ingestion, the shared curve filename is derived from stable
+metadata (`sheet`, subject, protocol, group, sequence type, N, and TN), not
+from the per-G BIDS filename. G and the per-file sequence number are excluded
+so points merge after `_dwi` renaming; CPMG and HAHN remain separate. The
+filename matcher recognizes `CPMG`/`HAHN` and a sequence number immediately
+before `_dwi_results`.
+
 Phantom NOGSE all-in-one core chain:
 
 ```bash

@@ -27,6 +27,7 @@ class ResultMeta:
     ndirs: int | None
     nbvals: int | None
     encoding: str | None
+    sequence_type: str | None
 
 
 def parse_results_filename(path: str | Path) -> ResultMeta:
@@ -69,7 +70,7 @@ def parse_results_filename(path: str | Path) -> ResultMeta:
 
     nbvals = _int(r"(\d+)bval")
     ndirs  = _int(r"(\d+)(?:ortho)?dir")
-    group = _int(r"_(\d{3})_(?:NOGSE|PGSE)")
+    group = _int(r"(?:^|[_-])(\d{3})_(?:NOGSE|PGSE)")
     G = _float_with_p(r"_G(\d+(?:p\d+|\.\d+)?)")
     TN = _float_with_p(r"_TN(\d+(?:p\d+|\.\d+)?)")
     N = _float_with_p(r"_N(\d+(?:p\d+|\.\d+)?)")
@@ -90,17 +91,28 @@ def parse_results_filename(path: str | Path) -> ResultMeta:
 
     seq = _int(r"_(\d+)_results")
     if seq is None:
+        seq = _int(r"_(\d+)_dwi_results")
+    if seq is None:
         seq = _int(r"(?:^|[_-])s(\d+)(?:_|$)")
     if seq is None:
         seq = _int(r"b\d+(?:\.\d+)?s(\d+)(?:_|$)")
-    encoding = "OGSE" if re.search(r"OGSE", name, re.IGNORECASE) else ("PGSE" if re.search(r"PGSE", name, re.IGNORECASE) else None)
+    if re.search(r"NOGSE", name, re.IGNORECASE):
+        encoding = "NOGSE"
+    elif re.search(r"OGSE", name, re.IGNORECASE):
+        encoding = "OGSE"
+    elif re.search(r"PGSE", name, re.IGNORECASE):
+        encoding = "PGSE"
+    else:
+        encoding = None
+    m_sequence_type = re.search(r"(?:^|_)(CPMG|HAHN)(?:_|$)", name, re.IGNORECASE)
+    sequence_type = m_sequence_type.group(1).upper() if m_sequence_type else None
 
     return ResultMeta(
         subject_id=subject_id,
         sheet=sheet, seq=seq, Hz=Hz, bmax=bmax, group=group, G=G, TN=TN, N=N,
         d_ms=(float(d_ms) if d_ms is not None else None),
         delta_ms=delta_ms, Delta_ms=Delta_ms,
-        ndirs=ndirs, nbvals=nbvals, encoding=encoding
+        ndirs=ndirs, nbvals=nbvals, encoding=encoding, sequence_type=sequence_type
     )
 
 
@@ -192,6 +204,12 @@ def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | Non
 
     if meta.N is not None and "N" in df.columns:
         df = _filter_close(df, "N", float(meta.N), atol=1e-6)
+
+    if meta.sequence_type is not None:
+        type_col = next((col for col in ("type", "seq_type") if col in df.columns), None)
+        if type_col is not None:
+            values = df[type_col].astype(str).str.strip().str.upper()
+            df = df[values == meta.sequence_type]
 
     # Hz
     Hz = 0 if (meta.Hz is None and meta.encoding == "PGSE") else meta.Hz

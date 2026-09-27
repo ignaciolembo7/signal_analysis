@@ -25,6 +25,7 @@ from data_processing.result_signals import (
     extract_clean_sequence_params,
     find_matching_gradient_vector,
     first_present,
+    grouped_direct_g_output_stem,
     is_single_point_results,
     master_analysis_id,
     merge_into_group_curve,
@@ -288,11 +289,14 @@ def save_processed_rows(
     if args.oneg and not grouped_g_curve:
         raise ValueError("--oneg expects a direct-g results file with one row per stat sheet.")
 
-    out_stem = output_stem_from_results_file(
-        args.results_file,
-        grouped_g_curve=grouped_g_curve,
-        strip_tokens=output_strip_tokens(args.strip_output_tokens),
-    )
+    if grouped_g_curve:
+        out_stem = grouped_direct_g_output_stem(clean_params)
+    else:
+        out_stem = output_stem_from_results_file(
+            args.results_file,
+            grouped_g_curve=False,
+            strip_tokens=output_strip_tokens(args.strip_output_tokens),
+        )
     out_path = exp_dir / f"{out_stem}.long.parquet"
 
     if grouped_g_curve:
@@ -305,13 +309,39 @@ def save_processed_rows(
     return df_to_save, out_path
 
 
-def append_to_master(df_to_save: pd.DataFrame, *, results_file: Path, master_path: Path) -> None:
+def _drop_existing_direct_g_curve(master: pd.DataFrame, curve: pd.DataFrame) -> pd.DataFrame:
+    remove = master["row_kind"].astype(str).eq("signal")
+    for col in ["sheet", "subj", "protocol", "group", "type", "TN", "N"]:
+        if col not in master.columns or col not in curve.columns:
+            continue
+        values = curve[col].dropna().unique()
+        if len(values) != 1:
+            continue
+        value = values[0]
+        if pd.api.types.is_numeric_dtype(curve[col]) or pd.api.types.is_numeric_dtype(master[col]):
+            numeric = pd.to_numeric(master[col], errors="coerce")
+            remove &= np.isclose(numeric.to_numpy(float), float(value), rtol=0.0, atol=1e-6)
+        else:
+            remove &= master[col].astype(str).str.strip().eq(str(value).strip())
+    return master.loc[~remove].reset_index(drop=True)
+
+
+def append_to_master(
+    df_to_save: pd.DataFrame,
+    *,
+    results_file: Path,
+    master_path: Path,
+    replace_direct_g_curve: bool = False,
+) -> None:
     master_rows = df_to_save.copy()
     master_rows["source_path"] = str(results_file.resolve())
     master_rows["source_hash"] = sha256_file(results_file)
     analysis_id = master_analysis_id(master_rows, row_kind="signal")
+    master = pd.read_parquet(master_path) if master_path.exists() else None
+    if replace_direct_g_curve and master is not None:
+        master = _drop_existing_direct_g_curve(master, master_rows)
     append_master_rows(
-        master_path if master_path.exists() else None,
+        master,
         master_rows,
         row_kind="signal",
         analysis_id=analysis_id,
@@ -388,7 +418,12 @@ def main() -> None:
     )
 
     if args.master_parquet is not None:
-        append_to_master(df_to_save, results_file=args.results_file, master_path=args.master_parquet)
+        append_to_master(
+            df_to_save,
+            results_file=args.results_file,
+            master_path=args.master_parquet,
+            replace_direct_g_curve=bool(args.oneg),
+        )
 
     print_selected_params(clean_params)
     print("Saved:", out_path)
