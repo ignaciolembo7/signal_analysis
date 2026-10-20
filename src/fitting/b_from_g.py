@@ -72,6 +72,46 @@ def b_from_g(
     return N * (gamma**2) * (delta_ms**2) * delta_app_ms * (g**2) / 1e9
 
 
+# NOGSE: b = b_per_g2 * g^2, with b_per_g2 in s/mm^2 per (mT/m)^2. The OGSE formula above
+# (N, delta, Delta_app) does not apply to NOGSE. The Pulseq NOGSE sequence (NOGSE repository,
+# since v11) writes the exact b of its trapezoids to .bval and the matching b_per_g2 to
+# <name>_diffusion.json ("b_per_g2_s_per_mm2_per_mt2_m2"), so sqrt(b / b_per_g2) returns the
+# played G. Without that file the rectangular-lobe value of the NOGSE models is used.
+NOGSE_B_PER_G2_KEY = "b_per_g2_s_per_mm2_per_mt2_m2"
+
+
+def nogse_rect_b_per_g2(*, N: float, TN_ms: float, x_ms: float, gamma: float) -> float:
+    """
+    Rectangular-lobe NOGSE b / g^2 = gamma^2 [(N - 1) x^3 + y^3] / 12 / 1e9, y = TN - (N - 1) x
+    (the b-value of M_nogse_free).
+
+    Expected units:
+      gamma: 1/(ms*mT)
+      TN_ms, x_ms: ms
+      result: s/mm^2 per (mT/m)^2
+    """
+    N, TN_ms, x_ms = float(N), float(TN_ms), float(x_ms)
+    y_ms = TN_ms - (N - 1.0) * x_ms
+    if not (np.isfinite(y_ms) and y_ms >= 0.0 and x_ms >= 0.0 and N >= 1.0):
+        raise ValueError(f"Invalid NOGSE timing N={N}, TN={TN_ms} ms, x={x_ms} ms (y={y_ms} ms).")
+    return (gamma**2) * ((N - 1.0) * x_ms**3 + y_ms**3) / 12.0 / 1e9
+
+
+def b_from_g_nogse(g_mTm: np.ndarray, *, b_per_g2: float) -> np.ndarray:
+    """NOGSE b (s/mm^2) = b_per_g2 [s/mm^2 per (mT/m)^2] * g^2, g in mT/m."""
+    return float(b_per_g2) * np.asarray(g_mTm, dtype=float) ** 2
+
+
+def g_from_b_nogse(bvalue: np.ndarray, *, b_per_g2: float) -> np.ndarray:
+    """NOGSE g (mT/m) = sqrt(b / b_per_g2); b = 0 gives g = 0."""
+    if not np.isfinite(float(b_per_g2)) or float(b_per_g2) <= 0.0:
+        raise ValueError(f"NOGSE b_per_g2 must be positive, got {b_per_g2!r}.")
+    b = np.asarray(bvalue, dtype=float)
+    g = np.sqrt(np.clip(b, 0.0, None) / float(b_per_g2))
+    g[np.isclose(b, 0.0)] = 0.0
+    return g
+
+
 def normalize_axis_base(axis: str) -> str:
     base = str(axis).strip()
     if base.endswith("_1") or base.endswith("_2"):
@@ -267,6 +307,7 @@ __all__ = [
     "axis_from_gradient",
     "axis_uses_bvalue",
     "b_from_g",
+    "b_from_g_nogse",
     "build_axis_bundle",
     "bvalue_column_name",
     "bvalue_from_gradient",
@@ -274,7 +315,10 @@ __all__ = [
     "default_plot_axis_for_fit",
     "extract_gradient_array",
     "gradient_base_for_axis",
+    "g_from_b_nogse",
     "gradient_column_name",
+    "NOGSE_B_PER_G2_KEY",
+    "nogse_rect_b_per_g2",
     "normalize_axis_base",
     "split_axis_side",
 ]

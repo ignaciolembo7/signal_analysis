@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+import numpy as np
+import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+SCRIPT_DATA_ROOT = REPO_ROOT / "scripts" / "data"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+if str(SCRIPT_DATA_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DATA_ROOT))
+
+from data_processing.result_signals import (  # noqa: E402
+    CleanSequenceParams,
+    add_g_and_b_derivatives,
+    is_nogse_params,
+    resolve_nogse_b_per_g2,
+)
+from fitting.b_from_g import b_from_g, g_from_b_nogse, nogse_rect_b_per_g2  # noqa: E402
+from models.model_fitting import _GYRO, M_nogse_free  # noqa: E402
+
+GAMMA = 267.5221900  # 1/(ms*mT), default of process_one_results.py
+
+
+def nogse_params(**changes) -> CleanSequenceParams:
+    values = dict(
+        sheet="PULSEQ_NOGSE", subj="phantom", protocol="NOGSE_TN50", sequence=1, group=None,
+        G=78.0, TN=50.0, x=25.0, y=25.0, type="NOGSE", Hz=np.nan, bmax=np.nan, N=2,
+        delta_ms=np.nan, Delta_app_ms=np.nan, max_dur_ms=np.nan, tm_ms=np.nan, td_ms=np.nan,
+        TE=np.nan, TR=np.nan, g_thorsten=None,
+    )
+    values.update(changes)
+    return CleanSequenceParams(**values)
+
+
+def b_long(bvalues) -> pd.DataFrame:
+    b = np.asarray(bvalues, dtype=float)
+    steps = np.searchsorted(np.unique(b), b)
+    return pd.DataFrame({"stat": "avg", "roi": "ROI", "direction": "1", "b_step": steps, "bvalue": b, "value": 1.0})
+
+
+class NogseBToGTests(unittest.TestCase):
+    def test_rectangular_b_matches_the_nogse_free_model(self) -> None:
+        # ln M = -b D0 with b in s/mm^2 and D0 in mm^2/s; the model uses D0 in m^2/ms.
+        D0_mm2_s = 2.0e-3
+        for N, TN, x in ((2, 50.0, 25.0), (2, 80.0, 2.5), (4, 40.0, 8.0)):
+            b = nogse_rect_b_per_g2(N=N, TN_ms=TN, x_ms=x, gamma=_GYRO) * 60.0**2  # gamma of the model
+            M = M_nogse_free(TN, 60.0, N, x, 1.0, D0_mm2_s * 1e-9)
+            self.assertAlmostEqual(-np.log(M), b * D0_mm2_s, places=9)
+
+    def test_g_from_b_inverts_b(self) -> None:
+        b_per_g2 = nogse_rect_b_per_g2(N=2, TN_ms=50.0, x_ms=25.0, gamma=GAMMA)
+        g = np.array([0.0, 7.8, 39.0, 78.0])
+        np.testing.assert_allclose(g_from_b_nogse(b_per_g2 * g**2, b_per_g2=b_per_g2), g, rtol=1e-12)
+        with self.assertRaises(ValueError):
+            g_from_b_nogse(g, b_per_g2=0.0)
+        with self.assertRaises(ValueError):
+            nogse_rect_b_per_g2(N=2, TN_ms=10.0, x_ms=25.0, gamma=GAMMA)  # y < 0
+
+    def test_nogse_rows_are_detected(self) -> None:
+        self.assertTrue(is_nogse_params(nogse_params()))
+        self.assertTrue(is_nogse_params(nogse_params(type=None, sheet="S", protocol=None)))  # TN and x only
+        ogse = nogse_params(type="OGSE", sheet="OGSE_d40", protocol="OGSE", TN=np.nan, x=np.nan,
+                            delta_ms=10.0, Delta_app_ms=20.0)
+        self.assertFalse(is_nogse_params(ogse))
+
+    def test_b_per_g2_priority(self) -> None:
+        rect = nogse_rect_b_per_g2(N=2, TN_ms=50.0, x_ms=25.0, gamma=GAMMA)
+        self.assertEqual(resolve_nogse_b_per_g2(nogse_params(), gamma=GAMMA), (rect, "rectangular_nogse"))
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "seq_diffusion.json"
+            summary.write_text(json.dumps({"b_per_g2_s_per_mm2_per_mt2_m2": 0.9 * rect}), encoding="utf-8")
+            value, source = resolve_nogse_b_per_g2(nogse_params(), gamma=GAMMA, diffusion_summary=summary)
+            self.assertAlmostEqual(value, 0.9 * rect)
+            self.assertEqual(source, str(summary))
+            # A b_per_g2 column in sequence_parameters wins over the sidecar.
+            value, source = resolve_nogse_b_per_g2(nogse_params(b_per_g2=1.5), gamma=GAMMA, diffusion_summary=summary)
+            self.assertEqual((value, source), (1.5, "sequence_parameters"))
+
+    def test_bvalue_axis_gives_the_played_nogse_g(self) -> None:
+        # Exact (trapezoid) b of the Pulseq sequence: b_per_g2 smaller than the rectangular value.
+        b_per_g2 = 0.97 * nogse_rect_b_per_g2(N=2, TN_ms=50.0, x_ms=25.0, gamma=GAMMA)
+        g_played = np.array([0.0, 0.0, 7.8, 15.6, 78.0])
+        out = add_g_and_b_derivatives(
+            b_long(b_per_g2 * g_played**2), gamma=GAMMA, N=2, delta_ms=np.nan, Delta_app_ms=np.nan,
+            g_thorsten=None, nogse_b_per_g2=b_per_g2,
+        )
+        np.testing.assert_allclose(out["g"], g_played, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(out["bvalue_g"], out["bvalue"], rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(out["g_max"], 78.0)
+
+    def test_ogse_conversion_is_unchanged(self) -> None:
+        g = np.array([0.0, 20.0, 40.0])
+        b = b_from_g(g, N=2, gamma=GAMMA, delta_ms=10.0, delta_app_ms=20.0, g_type="g")
+        out = add_g_and_b_derivatives(b_long(b), gamma=GAMMA, N=2, delta_ms=10.0, Delta_app_ms=20.0, g_thorsten=None)
+        np.testing.assert_allclose(out["g"], g, rtol=1e-12)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -11,7 +11,13 @@ import pandas as pd
 
 from data_processing.master_table import build_analysis_id_from_columns
 from data_processing.schema import finalize_clean_signal_long
-from fitting.b_from_g import b_from_g
+from fitting.b_from_g import (
+    NOGSE_B_PER_G2_KEY,
+    b_from_g,
+    b_from_g_nogse,
+    g_from_b_nogse,
+    nogse_rect_b_per_g2,
+)
 
 
 def norm_key(value: str) -> str:
@@ -142,6 +148,8 @@ class CleanSequenceParams:
     TE: float
     TR: float
     g_thorsten: float | None
+    # NOGSE b / g^2 in s/mm^2 per (mT/m)^2, if given in the sequence_parameters row.
+    b_per_g2: float | None = None
 
     def as_columns(self) -> dict[str, object]:
         out = {
@@ -229,6 +237,51 @@ def infer_project_root(path: Path) -> Path:
         if parent.name == "Data-signals":
             return parent.parent
     return resolved.parent
+
+
+def find_matching_diffusion_summary(results_file: Path) -> Path | None:
+    """<seq>_diffusion.json written by the Pulseq NOGSE sequence next to its .bval/.bvec."""
+    seq_name = results_file.name.removesuffix("_results.xlsx")
+    search_root = infer_project_root(results_file) / "Data-NIFTI"
+    if not search_root.is_dir():
+        return None
+    matches = sorted(search_root.rglob(f"{seq_name}_diffusion.json"))
+    return matches[0] if matches else None
+
+
+def is_nogse_params(params: "CleanSequenceParams") -> bool:
+    """NOGSE rows carry TN and x; OGSE/PGSE rows carry delta and Delta_app instead."""
+    text = " ".join(str(v) for v in (params.type, params.protocol, params.sheet) if v is not None)
+    if re.search(r"NOGSE", text, re.IGNORECASE):
+        return True
+    has_nogse_timing = finite_float(params.TN) is not None and finite_float(params.x) is not None
+    has_ogse_timing = finite_float(params.delta_ms) is not None and finite_float(params.Delta_app_ms) is not None
+    return has_nogse_timing and not has_ogse_timing
+
+
+def resolve_nogse_b_per_g2(
+    params: "CleanSequenceParams",
+    *,
+    gamma: float,
+    diffusion_summary: Path | None = None,
+) -> tuple[float, str]:
+    """
+    b / g^2 (s/mm^2 per (mT/m)^2) used to convert a NOGSE .bval to g, and its source.
+
+    Priority: b_per_g2 column of the sequence_parameters row, then the
+    <seq>_diffusion.json of the Pulseq sequence (exact b of the played trapezoids, so
+    g is the played gradient), then the rectangular NOGSE formula with N, TN and x.
+    """
+    if params.b_per_g2 is not None:
+        return float(params.b_per_g2), "sequence_parameters"
+    if diffusion_summary is not None:
+        import json
+
+        value = finite_float(json.loads(Path(diffusion_summary).read_text(encoding="utf-8")).get(NOGSE_B_PER_G2_KEY))
+        if value is None or value <= 0.0:
+            raise ValueError(f"{diffusion_summary} has no positive {NOGSE_B_PER_G2_KEY!r}.")
+        return value, str(diffusion_summary)
+    return nogse_rect_b_per_g2(N=params.N, TN_ms=params.TN, x_ms=params.x, gamma=gamma), "rectangular_nogse"
 
 
 def direction_from_vector_path(vector_path: Path | None) -> str:
@@ -502,6 +555,8 @@ def extract_clean_sequence_params(row: pd.Series, meta) -> CleanSequenceParams:
     else:
         g_thorsten = float(np.sqrt(2.0) * abs(g_thorsten))
 
+    b_per_g2 = finite_float(row_get(row, ["b_per_g2", NOGSE_B_PER_G2_KEY], None))
+
     return CleanSequenceParams(
         sheet=sheet,
         subj=subj,
@@ -524,6 +579,7 @@ def extract_clean_sequence_params(row: pd.Series, meta) -> CleanSequenceParams:
         TE=to_float(row_get(row, ["TE", "TE_ms", "Echo time TE  [ms]"], np.nan)),
         TR=to_float(row_get(row, ["TR", "TR_ms", "Repetition time TR  [ms]"], np.nan)),
         g_thorsten=g_thorsten,
+        b_per_g2=b_per_g2 if b_per_g2 is not None and b_per_g2 > 0.0 else None,
     )
 
 
@@ -562,14 +618,22 @@ def add_g_and_b_derivatives(
     delta_ms: float,
     Delta_app_ms: float,
     g_thorsten: float | None,
+    nogse_b_per_g2: float | None = None,
 ) -> pd.DataFrame:
+    """
+    g and b columns from a .bval axis. OGSE/PGSE: b = N gamma^2 delta^2 Delta_app g^2.
+    NOGSE (nogse_b_per_g2 given, s/mm^2 per (mT/m)^2): b = nogse_b_per_g2 * g^2.
+    """
     out = df.copy()
     out = ensure_numeric(out, ["bvalue", "b_step"])
 
     b = out["bvalue"].to_numpy(dtype=float)
-    denom = N * (gamma**2) * (delta_ms**2) * Delta_app_ms
-    g = np.sqrt((b * 1e9) / denom)
-    g[np.isclose(b, 0.0)] = 0.0
+    if nogse_b_per_g2 is not None:
+        g = g_from_b_nogse(b, b_per_g2=nogse_b_per_g2)
+    else:
+        denom = N * (gamma**2) * (delta_ms**2) * Delta_app_ms
+        g = np.sqrt((b * 1e9) / denom)
+        g[np.isclose(b, 0.0)] = 0.0
     out["g"] = g
 
     b_step_max = int(np.nanmax(out["b_step"].to_numpy(dtype=float)))
@@ -586,6 +650,11 @@ def add_g_and_b_derivatives(
         out["g_thorsten"] = np.nan
     else:
         out["g_thorsten"] = float(g_thorsten) * (out["b_step"] / float(b_step_max))
+
+    if nogse_b_per_g2 is not None:
+        for col, gcol in (("bvalue_g", "g"), ("bvalue_g_lin_max", "g_lin_max"), ("bvalue_thorsten", "g_thorsten")):
+            out[col] = b_from_g_nogse(pd.to_numeric(out[gcol], errors="coerce").to_numpy(float), b_per_g2=nogse_b_per_g2)
+        return out
 
     out["bvalue_g"] = b_from_g(
         pd.to_numeric(out["g"], errors="coerce").to_numpy(float),

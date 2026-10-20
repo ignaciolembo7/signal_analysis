@@ -23,14 +23,17 @@ from data_processing.result_signals import (
     detect_gradient_input_kind,
     direction_from_vector_path,
     extract_clean_sequence_params,
+    find_matching_diffusion_summary,
     find_matching_gradient_vector,
     first_present,
     grouped_direct_g_output_stem,
+    is_nogse_params,
     is_single_point_results,
     master_analysis_id,
     merge_into_group_curve,
     output_stem_from_results_file,
     output_strip_tokens,
+    resolve_nogse_b_per_g2,
     sha256_file,
     truthy_env,
 )
@@ -246,8 +249,18 @@ def attach_features(
     gradient_input_kind: str,
     clean_params,
     gamma: float,
+    results_file: Path | None = None,
 ) -> pd.DataFrame:
     if gradient_input_kind == "b":
+        # NOGSE b-values are converted with the NOGSE relation b = b_per_g2 * g^2, not
+        # with the OGSE delta/Delta_app formula.
+        nogse_b_per_g2 = None
+        if is_nogse_params(clean_params):
+            diffusion_summary = find_matching_diffusion_summary(results_file) if results_file is not None else None
+            nogse_b_per_g2, source = resolve_nogse_b_per_g2(
+                clean_params, gamma=gamma, diffusion_summary=diffusion_summary
+            )
+            print(f"NOGSE b -> g: b_per_g2 = {nogse_b_per_g2:.9g} s/mm^2 per (mT/m)^2 ({source})")
         out = add_g_and_b_derivatives(
             df_long,
             gamma=gamma,
@@ -255,6 +268,7 @@ def attach_features(
             delta_ms=float(clean_params.delta_ms),
             Delta_app_ms=float(clean_params.Delta_app_ms),
             g_thorsten=clean_params.g_thorsten,
+            nogse_b_per_g2=nogse_b_per_g2,
         )
         return add_s0_and_value_norm(out)
 
@@ -404,6 +418,7 @@ def main() -> None:
         gradient_input_kind=gradient_input_kind,
         clean_params=clean_params,
         gamma=float(args.gamma),
+        results_file=args.results_file,
     )
     df_long["one_g_per_sequence"] = bool(args.oneg)
     df_long = finalize_clean_signal_long(df_long)
