@@ -61,6 +61,8 @@ def read_sequence_params_xlsx(path: str | Path) -> pd.DataFrame:
             "Echo time TE  [ms]": "TE_ms",
             "Repetition time TR  [ms]": "TR_ms",
             "mixing time TM  [ms]": "TM_ms",
+            "NOGSE ramp time [ms]": "ramp_time_ms",
+            "ramp time [ms]": "ramp_time_ms",
         }
         sub = sub.rename(columns={k: v for k, v in rename.items() if k in sub.columns})
 
@@ -70,7 +72,7 @@ def read_sequence_params_xlsx(path: str | Path) -> pd.DataFrame:
         for c in [
             "seq", "Hz", "bmax", "delta_ms", "delta_app_ms", "N",
             "group", "G", "TN", "x", "y",
-            "g_thorsten", "max_dur_ms", "TE_ms", "TR_ms", "TM_ms",
+            "g_thorsten", "max_dur_ms", "TE_ms", "TR_ms", "TM_ms", "ramp_time_ms",
             "ndirs", "nbvals", "n_dirs", "n_bvals",
         ]:
             if c in sub.columns:
@@ -90,7 +92,7 @@ def read_sequence_params_xlsx(path: str | Path) -> pd.DataFrame:
         c for c in [
             "sheet","subj","protocol","seq","group","G","TN","Hz","bmax","max_dur_ms",
             "delta_ms","delta_app_ms","N","x","y","g_thorsten",
-            "type","seq_type","TE_ms","TR_ms","TM_ms"
+            "type","seq_type","TE_ms","TR_ms","TM_ms","ramp_time_ms"
         ] if c in params.columns
     ]
     rest = [c for c in params.columns if c not in col_order]

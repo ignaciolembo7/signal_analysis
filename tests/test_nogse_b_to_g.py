@@ -23,7 +23,12 @@ from data_processing.result_signals import (  # noqa: E402
     is_nogse_params,
     resolve_nogse_b_per_g2,
 )
-from fitting.b_from_g import b_from_g, g_from_b_nogse, nogse_rect_b_per_g2  # noqa: E402
+from fitting.b_from_g import (  # noqa: E402
+    b_from_g,
+    g_from_b_nogse,
+    nogse_rect_b_per_g2,
+    nogse_trapezoid_b_per_g2,
+)
 from models.model_fitting import _GYRO, M_nogse_free  # noqa: E402
 
 GAMMA = 267.5221900  # 1/(ms*mT), default of process_one_results.py
@@ -34,7 +39,7 @@ def nogse_params(**changes) -> CleanSequenceParams:
         sheet="PULSEQ_NOGSE", subj="phantom", protocol="NOGSE_TN50", sequence=1, group=None,
         G=78.0, TN=50.0, x=25.0, y=25.0, type="NOGSE", Hz=np.nan, bmax=np.nan, N=2,
         delta_ms=np.nan, Delta_app_ms=np.nan, max_dur_ms=np.nan, tm_ms=np.nan, td_ms=np.nan,
-        TE=np.nan, TR=np.nan, g_thorsten=None,
+        TE=np.nan, TR=np.nan, g_thorsten=None, ramp_time_ms=1.2,
     )
     values.update(changes)
     return CleanSequenceParams(**values)
@@ -64,6 +69,21 @@ class NogseBToGTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             nogse_rect_b_per_g2(N=2, TN_ms=10.0, x_ms=25.0, gamma=GAMMA)  # y < 0
 
+    def test_trapezoidal_formula_matches_played_phantom_sequences(self) -> None:
+        expected = {
+            (30.0, 15.0): 0.0304675246546,
+            (30.0, 5.0): 0.0798460984326,
+            (40.0, 20.0): 0.0780307798506,
+            (40.0, 5.0): 0.229386842953,
+            (50.0, 25.0): 0.159228715736,
+            (50.0, 5.0): 0.499869311654,
+            (70.0, 35.0): 0.458310204778,
+            (70.0, 5.0): 1.546785722396,
+        }
+        for (TN, x), coefficient in expected.items():
+            actual = nogse_trapezoid_b_per_g2(N=2, TN_ms=TN, x_ms=x, ramp_time_ms=1.2)
+            self.assertAlmostEqual(actual, coefficient, places=10)
+
     def test_nogse_rows_are_detected(self) -> None:
         self.assertTrue(is_nogse_params(nogse_params()))
         self.assertTrue(is_nogse_params(nogse_params(type=None, sheet="S", protocol=None)))  # TN and x only
@@ -71,18 +91,34 @@ class NogseBToGTests(unittest.TestCase):
                             delta_ms=10.0, Delta_app_ms=20.0)
         self.assertFalse(is_nogse_params(ogse))
 
-    def test_b_per_g2_priority(self) -> None:
+    def test_waveform_formula_priority_and_legacy_fallbacks(self) -> None:
         rect = nogse_rect_b_per_g2(N=2, TN_ms=50.0, x_ms=25.0, gamma=GAMMA)
-        self.assertEqual(resolve_nogse_b_per_g2(nogse_params(), gamma=GAMMA), (rect, "rectangular_nogse"))
+        exact = nogse_trapezoid_b_per_g2(N=2, TN_ms=50.0, x_ms=25.0, ramp_time_ms=1.2)
+        self.assertEqual(
+            resolve_nogse_b_per_g2(nogse_params(), gamma=GAMMA),
+            (exact, "trapezoidal_waveform(N,TN,x,ramp)"),
+        )
         with tempfile.TemporaryDirectory() as tmp:
             summary = Path(tmp) / "seq_diffusion.json"
             summary.write_text(json.dumps({"b_per_g2_s_per_mm2_per_mt2_m2": 0.9 * rect}), encoding="utf-8")
-            value, source = resolve_nogse_b_per_g2(nogse_params(), gamma=GAMMA, diffusion_summary=summary)
+            value, source = resolve_nogse_b_per_g2(
+                nogse_params(ramp_time_ms=np.nan), gamma=GAMMA, diffusion_summary=summary
+            )
             self.assertAlmostEqual(value, 0.9 * rect)
             self.assertEqual(source, str(summary))
-            # A b_per_g2 column in sequence_parameters wins over the sidecar.
-            value, source = resolve_nogse_b_per_g2(nogse_params(b_per_g2=1.5), gamma=GAMMA, diffusion_summary=summary)
+            # Older workbooks retain their previous priority when no ramp is known.
+            value, source = resolve_nogse_b_per_g2(
+                nogse_params(ramp_time_ms=np.nan, b_per_g2=1.5), gamma=GAMMA, diffusion_summary=summary
+            )
             self.assertEqual((value, source), (1.5, "sequence_parameters"))
+
+            with self.assertRaisesRegex(ValueError, "disagrees"):
+                resolve_nogse_b_per_g2(nogse_params(), gamma=GAMMA, diffusion_summary=summary)
+
+        self.assertEqual(
+            resolve_nogse_b_per_g2(nogse_params(ramp_time_ms=np.nan), gamma=GAMMA),
+            (rect, "rectangular_nogse"),
+        )
 
     def test_bvalue_axis_gives_the_played_nogse_g(self) -> None:
         # Exact (trapezoid) b of the Pulseq sequence: b_per_g2 smaller than the rectangular value.

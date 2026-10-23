@@ -17,6 +17,7 @@ from fitting.b_from_g import (
     b_from_g_nogse,
     g_from_b_nogse,
     nogse_rect_b_per_g2,
+    nogse_trapezoid_b_per_g2,
 )
 
 
@@ -148,7 +149,9 @@ class CleanSequenceParams:
     TE: float
     TR: float
     g_thorsten: float | None
+    ramp_time_ms: float = np.nan
     # NOGSE b / g^2 in s/mm^2 per (mT/m)^2, if given in the sequence_parameters row.
+    # Kept only for compatibility with older parameter workbooks.
     b_per_g2: float | None = None
 
     def as_columns(self) -> dict[str, object]:
@@ -173,6 +176,7 @@ class CleanSequenceParams:
             "td_ms": self.td_ms,
             "TE": self.TE,
             "TR": self.TR,
+            "ramp_time_ms": self.ramp_time_ms,
         }
         if self.g_thorsten is not None:
             out["g_thorsten"] = self.g_thorsten
@@ -268,10 +272,37 @@ def resolve_nogse_b_per_g2(
     """
     b / g^2 (s/mm^2 per (mT/m)^2) used to convert a NOGSE .bval to g, and its source.
 
-    Priority: b_per_g2 column of the sequence_parameters row, then the
-    <seq>_diffusion.json of the Pulseq sequence (exact b of the played trapezoids, so
-    g is the played gradient), then the rectangular NOGSE formula with N, TN and x.
+    When ``ramp_time_ms`` is present, compute the coefficient directly from the
+    exact Pulseq trapezoidal waveform (N, TN, x and ramp). Older workbooks can
+    still fall back to their stored coefficient, a diffusion-summary sidecar, or
+    finally the rectangular analytical model.
     """
+    if np.isfinite(params.ramp_time_ms) and params.ramp_time_ms > 0.0:
+        value = nogse_trapezoid_b_per_g2(
+            N=params.N,
+            TN_ms=params.TN,
+            x_ms=params.x,
+            ramp_time_ms=params.ramp_time_ms,
+        )
+        references: list[tuple[float, str]] = []
+        if params.b_per_g2 is not None:
+            references.append((float(params.b_per_g2), "legacy sequence_parameters b_per_g2"))
+        if diffusion_summary is not None:
+            import json
+
+            sidecar_value = finite_float(
+                json.loads(Path(diffusion_summary).read_text(encoding="utf-8")).get(NOGSE_B_PER_G2_KEY)
+            )
+            if sidecar_value is None or sidecar_value <= 0.0:
+                raise ValueError(f"{diffusion_summary} has no positive {NOGSE_B_PER_G2_KEY!r}.")
+            references.append((sidecar_value, str(diffusion_summary)))
+        for reference, source in references:
+            if not np.isclose(value, reference, rtol=1e-5, atol=1e-10):
+                raise ValueError(
+                    f"NOGSE waveform b/g^2={value:.12g} disagrees with {source}={reference:.12g}."
+                )
+        return value, "trapezoidal_waveform(N,TN,x,ramp)"
+
     if params.b_per_g2 is not None:
         return float(params.b_per_g2), "sequence_parameters"
     if diffusion_summary is not None:
@@ -556,6 +587,9 @@ def extract_clean_sequence_params(row: pd.Series, meta) -> CleanSequenceParams:
         g_thorsten = float(np.sqrt(2.0) * abs(g_thorsten))
 
     b_per_g2 = finite_float(row_get(row, ["b_per_g2", NOGSE_B_PER_G2_KEY], None))
+    ramp_time_ms = to_float(
+        row_get(row, ["ramp_time_ms", "NOGSE ramp time [ms]", "ramp time [ms]"], np.nan)
+    )
 
     return CleanSequenceParams(
         sheet=sheet,
@@ -579,6 +613,7 @@ def extract_clean_sequence_params(row: pd.Series, meta) -> CleanSequenceParams:
         TE=to_float(row_get(row, ["TE", "TE_ms", "Echo time TE  [ms]"], np.nan)),
         TR=to_float(row_get(row, ["TR", "TR_ms", "Repetition time TR  [ms]"], np.nan)),
         g_thorsten=g_thorsten,
+        ramp_time_ms=ramp_time_ms,
         b_per_g2=b_per_g2 if b_per_g2 is not None and b_per_g2 > 0.0 else None,
     )
 

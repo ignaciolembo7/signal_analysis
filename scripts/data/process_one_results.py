@@ -252,15 +252,15 @@ def attach_features(
     results_file: Path | None = None,
 ) -> pd.DataFrame:
     if gradient_input_kind == "b":
-        # NOGSE b-values are converted with the NOGSE relation b = b_per_g2 * g^2, not
-        # with the OGSE delta/Delta_app formula.
+        # NOGSE b-values use the exact NOGSE waveform, not the OGSE
+        # delta/Delta_app formula.
         nogse_b_per_g2 = None
         if is_nogse_params(clean_params):
             diffusion_summary = find_matching_diffusion_summary(results_file) if results_file is not None else None
             nogse_b_per_g2, source = resolve_nogse_b_per_g2(
                 clean_params, gamma=gamma, diffusion_summary=diffusion_summary
             )
-            print(f"NOGSE b -> g: b_per_g2 = {nogse_b_per_g2:.9g} s/mm^2 per (mT/m)^2 ({source})")
+            print(f"NOGSE b -> g: waveform coefficient = {nogse_b_per_g2:.9g} s/mm^2 per (mT/m)^2 ({source})")
         out = add_g_and_b_derivatives(
             df_long,
             gamma=gamma,
@@ -270,6 +270,20 @@ def attach_features(
             g_thorsten=clean_params.g_thorsten,
             nogse_b_per_g2=nogse_b_per_g2,
         )
+        if nogse_b_per_g2 is not None and np.isfinite(clean_params.ramp_time_ms):
+            expected_gmax = float(clean_params.G)
+            measured_gmax = float(pd.to_numeric(out["g"], errors="coerce").max())
+            if np.isfinite(expected_gmax) and expected_gmax > 0.0:
+                if not np.isclose(measured_gmax, expected_gmax, rtol=1e-5, atol=1e-3):
+                    raise ValueError(
+                        "NOGSE waveform check failed: b-values imply "
+                        f"Gmax={measured_gmax:.9g} mT/m, but sequence_parameters declares "
+                        f"G={expected_gmax:.9g} mT/m."
+                    )
+                print(
+                    f"NOGSE waveform check: bmax -> Gmax={measured_gmax:.9g} mT/m "
+                    f"(expected {expected_gmax:.9g} mT/m)"
+                )
         return add_s0_and_value_norm(out)
 
     out = df_long.copy()
@@ -388,6 +402,7 @@ def print_selected_params(clean_params) -> None:
                 "td_ms": clean_params.td_ms,
                 "TE": clean_params.TE,
                 "TR": clean_params.TR,
+                "ramp_time_ms": clean_params.ramp_time_ms,
             }
         ).to_string()
     )

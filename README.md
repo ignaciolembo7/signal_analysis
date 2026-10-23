@@ -547,15 +547,14 @@ NOGSE differs from OGSE in three important ways:
 
 - No `grad_correction` manifest is tracked for NOGSE in this repository.
 - The gradient x-axis is `g`, not `bvalue_thorsten` or `g_thorsten`.
-- Results with a b-value axis (`.bval`, e.g. the Pulseq NOGSE sequence) are converted to `g`
-  with the NOGSE relation `b = b_per_g2 * g^2` (s/mm^2, mT/m), not with the OGSE
-  `N gamma^2 delta^2 Delta_app` formula. `b_per_g2` comes from, in this order: a `b_per_g2`
-  column of the `sequence_parameters` row; the `<seq>_diffusion.json` written by the Pulseq
-  sequence next to its `.bval` under `Data-NIFTI/` (key `b_per_g2_s_per_mm2_per_mt2_m2`, exact
-  b of the played trapezoids, so `g` is the played gradient); otherwise the rectangular-lobe
-  value `gamma^2 [(N - 1) x^3 + y^3] / 12` with `N`, `TN` and `x` (ms) of the row. A row is
-  NOGSE if its type, protocol or sheet contains `NOGSE`, or if it has `TN` and `x` but no
-  `delta`/`Delta_app`.
+- Results with a b-value axis (`.bval`, e.g. the Pulseq NOGSE sequence) are converted directly
+  to `g` from the played trapezoidal NOGSE waveform. The calculation uses `N`, `TN`, `x` and
+  `ramp_time_ms`, plus the Pulseq gyromagnetic ratio (`gamma/2pi = 42.576 MHz/T`), and exactly
+  integrates `q(t)^2`; it does not use the OGSE `N gamma^2 delta^2 Delta_app` approximation.
+  When `G` is declared, ingestion also checks independently that the largest `.bval` maps back
+  to that maximum gradient. Legacy workbooks without `ramp_time_ms` can still use their old
+  `b_per_g2`/diffusion sidecar or rectangular fallback. A row is NOGSE if its type, protocol or
+  sheet contains `NOGSE`, or if it has `TN` and `x` but no `delta`/`Delta_app`.
 
 Brain NOGSE:
 
