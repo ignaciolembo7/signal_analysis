@@ -19,6 +19,14 @@ from plotting.core import (
 SIGNAL_KEYS = ["subj", "roi", "N", "td_ms", "direction", "b_step"]
 
 
+def _signal_keys(df: pd.DataFrame) -> list[str]:
+    """Return curve identity columns, keeping acquisition types independent."""
+    keys = list(SIGNAL_KEYS)
+    if "type" in df.columns:
+        keys.append("type")
+    return keys
+
+
 def analysis_id_from_path(path: Path) -> str:
     stem = path.stem
     if stem.endswith(".long"):
@@ -83,7 +91,8 @@ def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd
     if avg.empty:
         raise ValueError(f"No rows found for stat={stat!r}.")
 
-    avg_cols = SIGNAL_KEYS + [xcol, ycol]
+    signal_keys = _signal_keys(df)
+    avg_cols = signal_keys + [xcol, ycol]
     if ycol == "value_norm" and "S0" in avg.columns:
         avg_cols.append("S0")
     avg = avg[avg_cols].rename(columns={xcol: "x_raw", ycol: "y_mean"})
@@ -92,8 +101,8 @@ def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd
         avg["y_std"] = np.nan
         merged = avg
     else:
-        std = std[SIGNAL_KEYS + ["value"]].rename(columns={"value": "y_std"})
-        merged = avg.merge(std, on=SIGNAL_KEYS, how="left")
+        std = std[signal_keys + ["value"]].rename(columns={"value": "y_std"})
+        merged = avg.merge(std, on=signal_keys, how="left")
 
     merged["y_mean"] = pd.to_numeric(merged["y_mean"], errors="coerce")
     merged["y_std"] = pd.to_numeric(merged["y_std"], errors="coerce")
@@ -332,13 +341,20 @@ def plot_nogse_signal_table(
     merged = _prepare_avg_std(work, xcol=xcol, ycol=ycol, stat=stat)
     merged["x"] = pd.to_numeric(merged["x_raw"], errors="coerce")
 
+    type_group = []
+    if "type" in merged.columns and merged["type"].notna().any():
+        # A Hahn acquisition and a CPMG acquisition are different experiments,
+        # even when all their other curve coordinates coincide.
+        merged["type"] = merged["type"].fillna("unspecified").astype(str)
+        type_group = ["type"]
+
     xlabel = f"Modulation gradient strength G [mT/m] ({xcol})"
     ylabel = f"NOGSE signal ({ycol})"
 
     out_paths = _plot_series_by(
         merged=merged,
         out_dir=out_dir,
-        group_cols=["subj", "roi", "N", "direction"],
+        group_cols=["subj", *type_group, "roi", "N", "direction"],
         series_col="td_ms",
         file_prefix="NOGSE_vs_G_by-td",
         xlabel=xlabel,
@@ -349,7 +365,7 @@ def plot_nogse_signal_table(
         _plot_series_by(
             merged=merged,
             out_dir=out_dir,
-            group_cols=["subj", "roi", "N", "td_ms"],
+            group_cols=["subj", *type_group, "roi", "N", "td_ms"],
             series_col="direction",
             file_prefix="NOGSE_vs_G_by-direction",
             xlabel=xlabel,
