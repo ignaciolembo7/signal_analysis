@@ -21,7 +21,10 @@ case "$PLOT_ROW_KIND" in
         exit 2
         ;;
 esac
-PLOT_SIGNAL_YCOL="${PLOT_SIGNAL_YCOL:-value_norm}"
+# Keep the default folder contract unambiguous: ``signal`` is the absolute
+# master-table value, while ``signal_norm`` is S/S0.  The explicit
+# plot_signal_norm alias below still selects value_norm when requested.
+PLOT_SIGNAL_YCOL="${PLOT_SIGNAL_YCOL:-value}"
 case "$PLOT_ROW_KIND:$PLOT_SIGNAL_YCOL" in
     signal:value)              PLOT_OUTPUT_LABEL="signal" ;;
     signal:value_norm)         PLOT_OUTPUT_LABEL="signal_norm" ;;

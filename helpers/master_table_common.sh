@@ -597,8 +597,9 @@ What it does:
 Variables for this step:
   MASTER_PARQUET          Input master table.
   PLOT_SIGNAL_SCRIPT      Python script override.
-  PLOT_OUT_ROOT           Output root. Default:
-                          $ANALYSIS_ROOT/plots-master/signal/<PLOT_ROW_KIND>
+  PLOT_OUT_ROOT           Output root. Default is selected from row kind and y column:
+                          plots-master/signal, signal_norm,
+                          signal_rotated, or signal_rotated_norm.
   PLOT_ROW_KIND           signal_rotated|signal. Default: signal_rotated
   PLOT_SUBJ               Optional subj selector.
   PLOT_SHEET              Optional sheet selector.
@@ -607,7 +608,7 @@ Variables for this step:
   PLOT_TD_MS              Optional td_ms selector.
   PLOT_N                  Optional N selector.
                           OGSE plots default to N=1,4,8,12 only.
-  PLOT_SIGNAL_YCOL        value|value_norm. Default: value_norm
+  PLOT_SIGNAL_YCOL        value|value_norm. Default: value
   PLOT_SIGNAL_XCOL        Gradient column (x axis).
                           OGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
                           NOGSE: g|g_max|g_lin_max|g_thorsten|bvalue|bvalue_g|bvalue_thorsten. Default: g
