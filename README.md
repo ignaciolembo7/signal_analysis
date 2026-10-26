@@ -217,6 +217,40 @@ For new result filenames such as
 metadata path. Existing files without those columns are still ingested through
 the table-shape fallback.
 
+For a subject measured with more than one sequence implementation, add a
+`session_id` column with the same alphanumeric value used by the acquisition
+manifest. Ingest parses `ses-<SESSION_ID>` from each Results filename, uses it
+to disambiguate parameter rows, and preserves it in `master.long.parquet` and
+its `analysis_id`. Legacy workbooks without `session_id` remain supported.
+
+#### NOGSE x sweeps (autox, Pulseq sequence version v2.00.3)
+
+A file such as `T050_g010_3dir20x_AP_rep01` plays 2 b0 and then, for every `x`
+of the sweep, the directions x, y, z at one fixed `G`. Its `.bval` holds the exact
+b-value of every volume. The ingest recognises it by `type = AUTOX` in the
+`sequence_parameters` row or by `<D>dir<X>x` in the protocol name, keeps `g = G`
+for every weighted volume (0 for the b0), and gives every volume its `x` by
+inverting `b / G^2` of the played trapezoids (`fitting.b_from_g.nogse_x_from_b_per_g2`;
+`y = TN - (N - 1) x`). The row needs `type` (`AUTOX`), `TN`, `N`, `G` (mT/m) and
+`ramp_time_ms`; `x` stays empty. `S/S0` uses the two b0 of the same series.
+The `plot_signal*` steps plot these rows against `x` instead of `g`:
+`NOGSE_vs_x_by-G_*.png` (one curve per `G`, one file per direction) and
+`NOGSE_vs_x_by-direction_*.png` (one curve per direction, one file per `G`).
+
+Notebooks: `notebooks/nogse_fits_autox.ipynb` (the trapezoidal-lobe `D0` fits of
+`nogse_fits_trapezoidal_lobes.ipynb` against `x`, per ROI, `G` and direction,
+plus the contrast `M(x) - M(0)` and an optional restricted fit) and
+`notebooks/nogse_fits_autox_noise_floor.ipynb` (the same fits after removing the
+magnitude noise floor measured on the AUTOG session). An x sweep has no `b = 0`
+point inside the curve, so `M0` is fitted with `D0` by default (`FIT_M0 = True`);
+`FIT_M0 = False` gives the fixed `M0 = 1` fit of the `G` notebooks.
+
+Plots without fits (points joined; measured and with the noise floor of the free-water
+ROIs removed): `notebooks/nogse_plots_autox.ipynb` (x sweeps per direction, ROI and
+`G`, and the contrast `M(x) - M(0)`) and `notebooks/nogse_plots_autog.ipynb` (CPMG and
+Hahn `G` series for every `T`, the CPMG - Hahn contrasts per ROI and direction, fibres
+against water, and the measured contrast peaks).
+
 ### Manifests
 
 Some downstream steps need explicit manifest CSV files. The runner selects the
