@@ -36,6 +36,7 @@ class SignalTableTests(unittest.TestCase):
         meta = parse_results_filename("sub-BRAIN-1_ses-T0_acq-hz025d40b1075s6_results.xlsx")
 
         self.assertEqual(meta.subject_id, "BRAIN-1")
+        self.assertEqual(meta.session_id, "T0")
         self.assertEqual(meta.seq, 6)
         self.assertEqual(meta.Hz, 25.0)
         self.assertEqual(meta.bmax, 1075.0)
@@ -53,6 +54,25 @@ class SignalTableTests(unittest.TestCase):
         self.assertEqual(meta.TN, 50.0)
         self.assertEqual(meta.N, 2.0)
         self.assertEqual(meta.seq, 3)
+
+    def test_session_disambiguates_reused_sequence_numbers(self) -> None:
+        meta = parse_results_filename(
+            "sub-PHANTOM-3_ses-20261026NOGSEV2003AUTOX_acq-s3_results.xlsx"
+        )
+        params = pd.DataFrame(
+            {
+                "sheet": ["PHANTOM-3", "PHANTOM-3"],
+                "subj": ["PHANTOM-3", "PHANTOM-3"],
+                "session_id": ["20261026NOGSEV2001AUTOG", "20261026NOGSEV2003AUTOX"],
+                "seq": [3, 3],
+                "type": ["CPMG", "AUTOX"],
+            }
+        )
+
+        selected = select_params_row(params, meta)
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected["type"], "AUTOX")
 
     def test_nogse_type_disambiguates_cpmg_and_hahn_parameter_rows(self) -> None:
         meta = parse_results_filename(

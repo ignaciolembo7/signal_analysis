@@ -20,6 +20,7 @@ MASTER_BASE_COLUMNS = [
     "row_kind",
     "analysis_id",
     "subj",
+    "session_id",
     "sheet",
     "roi",
     "direction",
@@ -113,7 +114,7 @@ def _coerce_label_columns(df: pd.DataFrame) -> pd.DataFrame:
 def build_analysis_id_from_columns(
     row_or_df: pd.Series | pd.DataFrame | Mapping[str, object],
     *,
-    columns: Sequence[str] = ("subj", "sheet", "type", "td_ms", "N", "Hz", "direction"),
+    columns: Sequence[str] = ("subj", "session_id", "sheet", "type", "td_ms", "N", "Hz", "direction"),
     prefix: str | None = None,
 ) -> str:
     """

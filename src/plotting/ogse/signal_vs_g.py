@@ -48,7 +48,10 @@ def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd
     if avg.empty:
         raise ValueError(f"No rows with stat={stat!r} were found in the input table.")
 
-    avg_cols = SIGNAL_KEYS + [xcol, ycol]
+    signal_keys = list(SIGNAL_KEYS)
+    if "session_id" in df.columns and df["session_id"].notna().any():
+        signal_keys.insert(1, "session_id")
+    avg_cols = signal_keys + [xcol, ycol]
     if ycol == "value_norm" and "S0" in avg.columns:
         avg_cols.append("S0")
     avg = avg[avg_cols].rename(columns={ycol: "y_mean", xcol: "x_raw"})
@@ -56,8 +59,8 @@ def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd
         avg["y_std"] = np.nan
         merged = avg
     else:
-        std = std[SIGNAL_KEYS + ["value"]].rename(columns={"value": "y_std"})
-        merged = avg.merge(std, on=SIGNAL_KEYS, how="left")
+        std = std[signal_keys + ["value"]].rename(columns={"value": "y_std"})
+        merged = avg.merge(std, on=signal_keys, how="left")
 
     merged["y_mean"] = pd.to_numeric(merged["y_mean"], errors="coerce")
     merged["y_std"] = pd.to_numeric(merged["y_std"], errors="coerce")
@@ -172,6 +175,7 @@ def plot_ogse_signal_summary(
 
     merged = _prepare_avg_std(df, xcol=xcol, ycol=ycol, stat=stat)
     merged["x"] = compute_gradient_axis(merged["x_raw"], xcol=xcol)
+    session_group = ["session_id"] if "session_id" in merged.columns and merged["session_id"].notna().any() else []
 
     out_paths: list[Path] = []
 
@@ -184,7 +188,7 @@ def plot_ogse_signal_summary(
         _plot_series_by(
             merged=merged,
             out_dir=out_dir,
-            group_cols=["subj", "roi", "N", "direction"],
+            group_cols=["subj", *session_group, "roi", "N", "direction"],
             series_col="td_ms",
             file_prefix="OGSE_vs_G_by-td",
             xlabel=xlabel,
@@ -199,7 +203,7 @@ def plot_ogse_signal_summary(
         _plot_series_by(
             merged=merged,
             out_dir=out_dir,
-            group_cols=["subj", "roi", "N", "td_ms"],
+            group_cols=["subj", *session_group, "roi", "N", "td_ms"],
             series_col="direction",
             file_prefix="OGSE_vs_G_by-direction",
             xlabel=xlabel,

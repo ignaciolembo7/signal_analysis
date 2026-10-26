@@ -8,6 +8,7 @@ import numpy as np
 @dataclass(frozen=True)
 class ResultMeta:
     subject_id: str | None
+    session_id: str | None
     sheet: str | None
     seq: int | None
     Hz: float | None
@@ -67,6 +68,8 @@ def parse_results_filename(path: str | Path) -> ResultMeta:
 
     m_subject = re.search(r"(?:^|_)sub-([A-Za-z0-9.-]+)(?:_|$)", name, re.IGNORECASE)
     subject_id = m_subject.group(1) if m_subject else None
+    m_session = re.search(r"(?:^|_)ses-([A-Za-z0-9]+)(?:_|$)", name, re.IGNORECASE)
+    session_id = m_session.group(1) if m_session else None
 
     nbvals = _int(r"(\d+)bval")
     ndirs  = _int(r"(\d+)(?:ortho)?dir")
@@ -108,7 +111,7 @@ def parse_results_filename(path: str | Path) -> ResultMeta:
     sequence_type = m_sequence_type.group(1).upper() if m_sequence_type else None
 
     return ResultMeta(
-        subject_id=subject_id,
+        subject_id=subject_id, session_id=session_id,
         sheet=sheet, seq=seq, Hz=Hz, bmax=bmax, group=group, G=G, TN=TN, N=N,
         d_ms=(float(d_ms) if d_ms is not None else None),
         delta_ms=delta_ms, Delta_ms=Delta_ms,
@@ -153,14 +156,25 @@ def _filter_subject(df: pd.DataFrame, subject_id: str) -> pd.DataFrame:
     return out if not out.empty else df
 
 
+def _filter_session(df: pd.DataFrame, session_id: str) -> pd.DataFrame:
+    """Use session-specific rows while retaining legacy workbooks."""
+    if "session_id" not in df.columns:
+        return df
+    values = df["session_id"].fillna("").astype(str).str.strip()
+    if not values.ne("").any():
+        return df
+    return df[values.str.casefold() == str(session_id).strip().casefold()]
+
+
 def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | None:
     """
     Strict match policy:
     1) The sheet name must match exactly.
-    2) If a group number is available, match it inside that sheet.
-    3) If a sequence number is available, match the Excel sequence column inside that sheet/group.
-    4) If more than one row still remains, use gradient, Hz, and timing fields to disambiguate.
-    5) Do not silently fall back to another sheet.
+    2) If session metadata is available, match it inside that sheet/subject.
+    3) If a group number is available, match it inside that session.
+    4) If a sequence number is available, match the Excel sequence column.
+    5) If more than one row still remains, use gradient, Hz, and timing fields to disambiguate.
+    6) Do not silently fall back to another sheet.
     
     Returns:
         pd.Series with the matched row, or None if no match is found.
@@ -182,6 +196,11 @@ def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | Non
 
     if df.empty:
         return None
+
+    if meta.session_id is not None:
+        df = _filter_session(df, meta.session_id)
+        if df.empty:
+            return None
 
     # Group disambiguates direct-g acquisitions whose sequence numbers belong to separate curves.
     if meta.group is not None and "group" in df.columns:
@@ -243,7 +262,8 @@ def select_params_row(params: pd.DataFrame, meta: ResultMeta) -> pd.Series | Non
         raise ValueError(
             "More than one parameter row matched. "
             "Refine the metadata or make the Excel table more specific.\n"
-            f"sheet={target_sheet!r}, subject_id={meta.subject_id!r}, seq={meta.seq}, Hz={meta.Hz}, d_ms={meta.d_ms}, "
+            f"sheet={target_sheet!r}, subject_id={meta.subject_id!r}, session_id={meta.session_id!r}, "
+            f"seq={meta.seq}, Hz={meta.Hz}, d_ms={meta.d_ms}, "
             f"delta_ms={meta.delta_ms}, Delta_ms={meta.Delta_ms}"
         )
 

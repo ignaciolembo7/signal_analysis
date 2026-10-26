@@ -6,6 +6,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
+from data_processing.result_signals import X_SWEEP_NAME
 from plotting.core import (
     XYSeries,
     compact_float,
@@ -22,9 +23,25 @@ SIGNAL_KEYS = ["subj", "roi", "N", "td_ms", "direction", "b_step"]
 def _signal_keys(df: pd.DataFrame) -> list[str]:
     """Return curve identity columns, keeping acquisition types independent."""
     keys = list(SIGNAL_KEYS)
+    if "session_id" in df.columns and df["session_id"].notna().any():
+        keys.insert(1, "session_id")
     if "type" in df.columns:
         keys.append("type")
     return keys
+
+
+def x_sweep_mask(df: pd.DataFrame) -> pd.Series:
+    """Rows of NOGSE x sweeps (autox, sequence version v2.00.3): G fixed, x changes from volume to volume.
+
+    Same rule as ``data_processing.result_signals.is_x_sweep_params``: type ``AUTOX`` or a protocol
+    name with ``<D>dir<X>x``.
+    """
+    mask = pd.Series(False, index=df.index)
+    if "type" in df.columns:
+        mask |= df["type"].astype(str).str.strip().str.upper().eq("AUTOX")
+    if "protocol" in df.columns:
+        mask |= df["protocol"].astype(str).str.contains(X_SWEEP_NAME)
+    return mask
 
 
 def analysis_id_from_path(path: Path) -> str:
@@ -84,14 +101,21 @@ def prepare_signal_series(
     return data[xcol].to_numpy(dtype=float), data[ycol].to_numpy(dtype=float), sigma
 
 
-def _prepare_avg_std(df: pd.DataFrame, *, xcol: str, ycol: str, stat: str) -> pd.DataFrame:
+def _prepare_avg_std(
+    df: pd.DataFrame,
+    *,
+    xcol: str,
+    ycol: str,
+    stat: str,
+    extra_keys: Sequence[str] = (),
+) -> pd.DataFrame:
     avg = df[df["stat"].astype(str) == str(stat)].copy()
     std = df[df["stat"].astype(str) == "std"].copy()
 
     if avg.empty:
         raise ValueError(f"No rows found for stat={stat!r}.")
 
-    signal_keys = _signal_keys(df)
+    signal_keys = _signal_keys(df) + list(extra_keys)
     avg_cols = signal_keys + [xcol, ycol]
     if ycol == "value_norm" and "S0" in avg.columns:
         avg_cols.append("S0")
@@ -136,8 +160,11 @@ def _plot_token(parts: dict[str, object]) -> str:
     return "_".join(f"{sanitize_token(key)}-{sanitize_token(_format_value(value))}" for key, value in parts.items())
 
 
+TITLE_KEYS = {"session_id": "ses"}
+
+
 def _plot_title(parts: dict[str, object], *, stat: str) -> str:
-    title_parts = [f"{key}={_format_value(value)}" for key, value in parts.items()]
+    title_parts = [f"{TITLE_KEYS.get(key, key)}={_format_value(value)}" for key, value in parts.items()]
     title_parts.append(f"stat={stat}")
     return " | ".join(title_parts)
 
@@ -338,15 +365,68 @@ def plot_nogse_signal_table(
     out_dir = out_root / analysis_id if analysis_id else out_root
     ensure_dir(out_dir)
 
-    merged = _prepare_avg_std(work, xcol=xcol, ycol=ycol, stat=stat)
-    merged["x"] = pd.to_numeric(merged["x_raw"], errors="coerce")
+    # x sweeps are plotted against x (one curve per G or per direction), every other
+    # NOGSE acquisition against ``xcol`` (one curve per td_ms or per direction).
+    sweep = x_sweep_mask(work)
+    out_paths: list[Path] = []
+    if (~sweep).any():
+        out_paths.extend(_plot_g_curves(work.loc[~sweep], out_dir=out_dir, xcol=xcol, ycol=ycol, stat=stat))
+    if sweep.any():
+        out_paths.extend(_plot_x_sweep_curves(work.loc[sweep], out_dir=out_dir, ycol=ycol, stat=stat))
+    return out_paths
 
+
+def _curve_groups(merged: pd.DataFrame) -> tuple[list[str], list[str]]:
     type_group = []
     if "type" in merged.columns and merged["type"].notna().any():
         # A Hahn acquisition and a CPMG acquisition are different experiments,
         # even when all their other curve coordinates coincide.
         merged["type"] = merged["type"].fillna("unspecified").astype(str)
         type_group = ["type"]
+    session_group = ["session_id"] if "session_id" in merged.columns and merged["session_id"].notna().any() else []
+    return session_group, type_group
+
+
+def _plot_x_sweep_curves(df: pd.DataFrame, *, out_dir: Path, ycol: str, stat: str) -> list[Path]:
+    # The G series of one sweep share session, type, td_ms and b_step: G keeps their avg/std apart.
+    merged = _prepare_avg_std(df, xcol="x", ycol=ycol, stat=stat, extra_keys=["G"])
+    merged["x"] = pd.to_numeric(merged["x_raw"], errors="coerce")
+    merged["G"] = pd.to_numeric(merged["G"], errors="coerce")
+    merged = merged.dropna(subset=["x", "G"])  # the b0 volumes have no x
+    session_group, type_group = _curve_groups(merged)
+    base_cols = ["subj", *session_group, *type_group, "roi", "N", "td_ms"]
+
+    xlabel = "NOGSE period x [ms]"
+    ylabel = f"NOGSE signal ({ycol})"
+    out_paths = _plot_series_by(
+        merged=merged,
+        out_dir=out_dir,
+        group_cols=[*base_cols, "direction"],
+        series_col="G",
+        file_prefix="NOGSE_vs_x_by-G",
+        xlabel=xlabel,
+        ylabel=ylabel,
+        stat=stat,
+    )
+    out_paths.extend(
+        _plot_series_by(
+            merged=merged,
+            out_dir=out_dir,
+            group_cols=[*base_cols, "G"],
+            series_col="direction",
+            file_prefix="NOGSE_vs_x_by-direction",
+            xlabel=xlabel,
+            ylabel=ylabel,
+            stat=stat,
+        )
+    )
+    return out_paths
+
+
+def _plot_g_curves(df: pd.DataFrame, *, out_dir: Path, xcol: str, ycol: str, stat: str) -> list[Path]:
+    merged = _prepare_avg_std(df, xcol=xcol, ycol=ycol, stat=stat)
+    merged["x"] = pd.to_numeric(merged["x_raw"], errors="coerce")
+    session_group, type_group = _curve_groups(merged)
 
     xlabel = f"Modulation gradient strength G [mT/m] ({xcol})"
     ylabel = f"NOGSE signal ({ycol})"
@@ -354,7 +434,7 @@ def plot_nogse_signal_table(
     out_paths = _plot_series_by(
         merged=merged,
         out_dir=out_dir,
-        group_cols=["subj", *type_group, "roi", "N", "direction"],
+        group_cols=["subj", *session_group, *type_group, "roi", "N", "direction"],
         series_col="td_ms",
         file_prefix="NOGSE_vs_G_by-td",
         xlabel=xlabel,
@@ -365,7 +445,7 @@ def plot_nogse_signal_table(
         _plot_series_by(
             merged=merged,
             out_dir=out_dir,
-            group_cols=["subj", *type_group, "roi", "N", "td_ms"],
+            group_cols=["subj", *session_group, *type_group, "roi", "N", "td_ms"],
             series_col="direction",
             file_prefix="NOGSE_vs_G_by-direction",
             xlabel=xlabel,

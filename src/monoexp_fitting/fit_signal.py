@@ -441,9 +441,12 @@ def fit_signal_monoexp(
 
     params_rows: list[dict] = []
     point_rows: list[dict] = []
-    group_cols = [c for c in ["subj", "sheet", "td_ms", "N", "Hz", "roi", "direction"] if c in dfa.columns]
+    group_cols = [
+        c for c in ["subj", "session_id", "sheet", "td_ms", "N", "Hz", "roi", "direction"]
+        if c in dfa.columns and (c != "session_id" or dfa[c].notna().any())
+    ]
     meta_cols = [
-        "subj", "sheet", "type", "sequence", "group", "protocol", "source_file",
+        "subj", "session_id", "sheet", "type", "sequence", "group", "protocol", "source_file",
         "td_ms", "N", "Hz", "TE", "TR", "max_dur_ms", "tm_ms", "delta_ms", "Delta_app_ms", "bmax",
     ]
 

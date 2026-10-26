@@ -90,7 +90,7 @@ def read_sequence_params_xlsx(path: str | Path) -> pd.DataFrame:
     # Keep relevant columns first when they exist.
     col_order = [
         c for c in [
-            "sheet","subj","protocol","seq","group","G","TN","Hz","bmax","max_dur_ms",
+            "sheet","subj","session_id","protocol","seq","group","G","TN","Hz","bmax","max_dur_ms",
             "delta_ms","delta_app_ms","N","x","y","g_thorsten",
             "type","seq_type","TE_ms","TR_ms","TM_ms","ramp_time_ms"
         ] if c in params.columns

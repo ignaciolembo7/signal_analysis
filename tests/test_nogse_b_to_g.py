@@ -84,6 +84,20 @@ class NogseBToGTests(unittest.TestCase):
             actual = nogse_trapezoid_b_per_g2(N=2, TN_ms=TN, x_ms=x, ramp_time_ms=1.2)
             self.assertAlmostEqual(actual, coefficient, places=10)
 
+    def test_pure_hahn_limit_matches_played_v2_00_2_sequences(self) -> None:
+        # x = 0 (sequence version v2.00.2): two Hahn lobes of TN/2; b/g^2 of the _diffusion.json sidecars.
+        expected = {30.0: 0.141503363056, 40.0: 0.347042272766, 50.0: 0.691413694259, 65.0: 1.546553981841}
+        for TN, coefficient in expected.items():
+            actual = nogse_trapezoid_b_per_g2(N=2, TN_ms=TN, x_ms=0.0, ramp_time_ms=1.2)
+            self.assertAlmostEqual(actual, coefficient, places=10)
+        # Without ramps, the rectangular Hahn limit gamma^2 TN^3 / 12.
+        rect = nogse_rect_b_per_g2(N=2, TN_ms=50.0, x_ms=0.0, gamma=GAMMA)
+        self.assertAlmostEqual(
+            nogse_trapezoid_b_per_g2(N=2, TN_ms=50.0, x_ms=0.0, ramp_time_ms=1e-6, gamma=GAMMA), rect, places=6
+        )
+        with self.assertRaises(ValueError):
+            nogse_trapezoid_b_per_g2(N=2, TN_ms=50.0, x_ms=-1.0, ramp_time_ms=1.2)
+
     def test_nogse_rows_are_detected(self) -> None:
         self.assertTrue(is_nogse_params(nogse_params()))
         self.assertTrue(is_nogse_params(nogse_params(type=None, sheet="S", protocol=None)))  # TN and x only

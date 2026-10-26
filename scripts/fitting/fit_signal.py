@@ -62,7 +62,7 @@ def _selected_from_manifest(
         )
 
     selectors: dict[str, object] = {"row_kind": default_row_kind}
-    for col in ["subj", "sheet", "roi", "direction"]:
+    for col in ["subj", "session_id", "sheet", "roi", "direction"]:
         value = manifest_row.get(col)
         if value is not None and not pd.isna(value) and str(value).strip().upper() != "ALL":
             selectors[col] = str(value).strip()

@@ -46,6 +46,26 @@ def sanitize_token(value: object) -> str:
     return token or "NA"
 
 
+TITLE_FONTSIZE = 11
+TITLE_WIDTH = 64
+
+
+def wrap_title(title: str, *, width: int = TITLE_WIDTH, sep: str = " | ") -> str:
+    """Break a ``sep``-joined title into lines of at most ``width`` characters, never inside a field."""
+    lines: list[str] = []
+    for raw_line in str(title).splitlines():
+        current = ""
+        for field in raw_line.split(sep):
+            candidate = field if not current else f"{current}{sep}{field}"
+            if current and len(candidate) > width:
+                lines.append(current)
+                current = field
+            else:
+                current = candidate
+        lines.append(current)
+    return "\n".join(lines)
+
+
 def distinct_colors(n: int) -> list[str]:
     if n <= 0:
         return []
@@ -143,7 +163,7 @@ def render_xy_plot(
     if ylim is not None:
         ax.set_ylim(*ylim)
 
-    ax.set_title(title)
+    ax.set_title(wrap_title(title), fontsize=TITLE_FONTSIZE)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.grid(True, linestyle="--", alpha=0.3)
@@ -204,7 +224,7 @@ def render_multi_series_plot(
     if ylim is not None:
         ax.set_ylim(*ylim)
 
-    ax.set_title(title)
+    ax.set_title(wrap_title(title), fontsize=TITLE_FONTSIZE)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.grid(True, linestyle="--", alpha=0.3)

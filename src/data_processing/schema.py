@@ -20,7 +20,7 @@ CLEAN_SIGNAL_LONG_COLUMNS = [
     "TE","TR","td_ms","Hz","ramp_time_ms",
     "max_dur_ms","Delta_app_ms","delta_ms","tm_ms", 
     "TN","N","G","x", "y",
-    "subj","type","protocol","sequence","group","sheet","source_file",
+    "subj","session_id","type","protocol","sequence","group","sheet","source_file",
 ]
 
 CLEAN_DPROJ_LONG_COLUMNS = [
@@ -33,7 +33,7 @@ CLEAN_DPROJ_LONG_COLUMNS = [
     "TE","TR","td_ms","Hz","ramp_time_ms",
     "max_dur_ms","Delta_app_ms","delta_ms","tm_ms",
     "TN","N","G","x","y",
-    "subj","type","protocol","sequence","group","sheet","source_file",
+    "subj","session_id","type","protocol","sequence","group","sheet","source_file",
 ]
 
 SIGNAL_LONG_PREFIX = [
@@ -48,7 +48,7 @@ SIGNAL_LONG_PREFIX = [
     "TE","TR","td_ms","Hz","ramp_time_ms",
     "max_dur_ms","Delta_app_ms","delta_ms","tm_ms", 
     "TN","N","G","x","y",
-    "subj","type","sequence","group","protocol","sheet","source_file",
+    "subj","session_id","type","sequence","group","protocol","sheet","source_file",
 ]
 
 DPROJ_LONG_PREFIX = [
@@ -61,7 +61,7 @@ DPROJ_LONG_PREFIX = [
     "TE","TR","td_ms","Hz","ramp_time_ms",
     "max_dur_ms","Delta_app_ms","delta_ms","tm_ms",
     "TN","N","G","x","y",
-    "subj","type","sequence","group","protocol","sheet","source_file",
+    "subj","session_id","type","sequence","group","protocol","sheet","source_file",
 ]
 
 RENAME_MAP = {

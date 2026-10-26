@@ -38,6 +38,7 @@ def _signal_rows() -> pd.DataFrame:
             "N": [2, 2],
             "Hz": [50.0, 50.0],
             "subj": ["S1", "S1"],
+            "session_id": ["protocolA", "protocolA"],
             "sheet": ["S1", "S1"],
             "source_file": ["legacy.long.parquet", "legacy.long.parquet"],
         }
@@ -105,11 +106,14 @@ class MasterTableTests(unittest.TestCase):
     def test_build_analysis_id_from_columns_requires_unique_values(self) -> None:
         analysis_id = build_analysis_id_from_columns(
             _signal_rows(),
-            columns=("subj", "td_ms", "N", "direction"),
+            columns=("subj", "session_id", "td_ms", "N", "direction"),
             prefix="signal",
         )
 
-        self.assertEqual(analysis_id, "signal_subj-S1_td_ms-40_N-2_direction-long")
+        self.assertEqual(
+            analysis_id,
+            "signal_subj-S1_session_id-protocolA_td_ms-40_N-2_direction-long",
+        )
 
         mixed = _signal_rows().copy()
         mixed.loc[1, "N"] = 4

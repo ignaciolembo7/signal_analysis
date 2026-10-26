@@ -22,6 +22,7 @@ from fitting.parameter_modes import (
 MASTER_SELECTOR_ARGS = (
     ("analysis_id", "analysis_id"),
     ("subj", "subj"),
+    ("session_id", "session_id"),
     ("sheet", "sheet"),
     ("roi", "roi"),
     ("direction", "direction"),
@@ -110,6 +111,10 @@ def add_master_source_args(
     parser.add_argument("--row-kind", default=default_row_kind, help="Master row_kind selector. Defaults to the fitter's natural input kind.")
     parser.add_argument("--analysis-id", action="append", default=None, help="Master analysis_id selector. Can be repeated or comma-separated.")
     parser.add_argument("--subj", action="append", default=None, help="Master subj selector. Can be repeated or comma-separated.")
+    parser.add_argument(
+        "--session-id", "--session_id", dest="session_id", action="append", default=None,
+        help="Master session_id selector. Can be repeated or comma-separated.",
+    )
     parser.add_argument("--sheet", action="append", default=None, help="Master sheet selector. Can be repeated or comma-separated.")
     if include_roi:
         parser.add_argument("--roi", action="append", default=None, help="Master ROI selector. Can be repeated or comma-separated.")
@@ -362,6 +367,7 @@ def append_fit_params_outputs(
     for attr, col in [
         ("analysis_id", "analysis_id"),
         ("subj", "subj"),
+        ("session_id", "session_id"),
         ("sheet", "sheet"),
         ("roi", "roi"),
         ("direction", "direction"),

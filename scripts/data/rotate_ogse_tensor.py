@@ -36,6 +36,7 @@ def _infer_exp_dir(df: pd.DataFrame, long_parquet: Path) -> str:
 def _analysis_id_from_columns(df: pd.DataFrame, *, row_kind: str) -> str:
     preferred = (
         "subj",
+        "session_id",
         "sheet",
         "type",
         "protocol",
@@ -60,7 +61,7 @@ def _analysis_id_from_columns(df: pd.DataFrame, *, row_kind: str) -> str:
 def _drop_existing_rotation_rows(master: pd.DataFrame, rotated: pd.DataFrame) -> pd.DataFrame:
     """Remove previous rotated/dproj rows for the same acquisition group."""
     out = master.copy()
-    group_cols = [c for c in ["subj", "sheet", "td_ms", "N", "Hz"] if c in rotated.columns and c in out.columns]
+    group_cols = [c for c in ["subj", "session_id", "sheet", "td_ms", "N", "Hz"] if c in rotated.columns and c in out.columns]
     if not group_cols:
         return out
 
@@ -103,7 +104,7 @@ def _replace_signal_rows(master: pd.DataFrame | None, signal_rows: pd.DataFrame)
         return None
     key_cols = [
         c
-        for c in ["subj", "sheet", "td_ms", "N", "Hz", "stat", "roi", "direction", "b_step"]
+        for c in ["subj", "session_id", "sheet", "td_ms", "N", "Hz", "stat", "roi", "direction", "b_step"]
         if c in master.columns and c in signal_rows.columns
     ]
     if not key_cols:

@@ -29,6 +29,8 @@ from data_processing.result_signals import (
     grouped_direct_g_output_stem,
     is_nogse_params,
     is_single_point_results,
+    is_x_sweep_params,
+    add_x_sweep_derivatives,
     master_analysis_id,
     merge_into_group_curve,
     output_stem_from_results_file,
@@ -251,6 +253,13 @@ def attach_features(
     gamma: float,
     results_file: Path | None = None,
 ) -> pd.DataFrame:
+    if gradient_input_kind == "b" and is_x_sweep_params(clean_params):
+        # NOGSE x sweep (autox, sequence version v2.00.3): G fixed, x of every volume from its b-value.
+        out = add_x_sweep_derivatives(df_long, clean_params)
+        xs = sorted(pd.to_numeric(out["x"], errors="coerce").dropna().unique())
+        print(f"NOGSE x sweep: G = {clean_params.G:g} mT/m, {len(xs)} x from {xs[0]:.4g} to {xs[-1]:.4g} ms (from the b-values)")
+        return add_s0_and_value_norm(out)
+
     if gradient_input_kind == "b":
         # NOGSE b-values use the exact NOGSE waveform, not the OGSE
         # delta/Delta_app formula.
@@ -339,7 +348,7 @@ def save_processed_rows(
 
 def _drop_existing_direct_g_curve(master: pd.DataFrame, curve: pd.DataFrame) -> pd.DataFrame:
     remove = master["row_kind"].astype(str).eq("signal")
-    for col in ["sheet", "subj", "protocol", "group", "type", "TN", "N"]:
+    for col in ["sheet", "subj", "session_id", "protocol", "group", "type", "TN", "N"]:
         if col not in master.columns or col not in curve.columns:
             continue
         values = curve[col].dropna().unique()
@@ -384,6 +393,7 @@ def print_selected_params(clean_params) -> None:
             {
                 "sheet": clean_params.sheet,
                 "subj": clean_params.subj,
+                "session_id": clean_params.session_id,
                 "protocol": clean_params.protocol,
                 "sequence": clean_params.sequence,
                 "group": clean_params.group,

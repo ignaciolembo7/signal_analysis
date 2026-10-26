@@ -114,6 +114,40 @@ class MonoexpFitSignalTests(unittest.TestCase):
         self.assertEqual(int(outputs.fit_params.loc[0, "fit_points"]), 4)
         self.assertEqual(int(outputs.fit_points["used_for_fit"].sum()), 4)
 
+    def test_fit_signal_keeps_sessions_as_independent_curves(self) -> None:
+        b = np.array([0.0, 100.0, 200.0, 300.0])
+        frames = []
+        for session_id, d0 in (("AUTOG", 0.0020), ("AUTOX", 0.0030)):
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "subj": ["S1"] * len(b),
+                        "session_id": [session_id] * len(b),
+                        "sheet": ["S1"] * len(b),
+                        "td_ms": [90.0] * len(b),
+                        "N": [4] * len(b),
+                        "Hz": [25.0] * len(b),
+                        "roi": ["ROI_A"] * len(b),
+                        "direction": ["long"] * len(b),
+                        "stat": ["avg"] * len(b),
+                        "b_step": np.arange(len(b)),
+                        "bvalue_thorsten": b,
+                        "value_norm": monoexp(b, 1.0, d0),
+                    }
+                )
+            )
+
+        outputs = fit_signal_monoexp(
+            pd.concat(frames, ignore_index=True),
+            b_axis="bvalue_thorsten",
+            fit_points=4,
+            fix_M0=1.0,
+            D0_init=0.0023,
+        )
+
+        self.assertEqual(set(outputs.fit_params["session_id"]), {"AUTOG", "AUTOX"})
+        self.assertEqual(len(outputs.fit_params), 2)
+
     def test_fit_signal_never_scales_scanner_b_with_gradient_correction(self) -> None:
         # The scanner b-value is already the applied b: grad_correction_factor only rescales g for
         # OGSE/NOGSE model fits, so a monoexponential fit must ignore it (and only report it).

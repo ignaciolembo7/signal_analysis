@@ -183,11 +183,11 @@ def fit_ogse_free_signal(
 
     group_cols = [
         column
-        for column in ("subj", "sheet", "td_ms", "N", "Hz", "roi", "direction")
-        if column in work.columns
+        for column in ("subj", "session_id", "sheet", "td_ms", "N", "Hz", "roi", "direction")
+        if column in work.columns and (column != "session_id" or work[column].notna().any())
     ]
     metadata_cols = [
-        "subj", "sheet", "type", "sequence", "group", "protocol", "source_file",
+        "subj", "session_id", "sheet", "type", "sequence", "group", "protocol", "source_file",
         "td_ms", "N", "Hz", "TE", "TR", "max_dur_ms", "tm_ms", "delta_ms",
         "Delta_app_ms", "bmax",
     ]

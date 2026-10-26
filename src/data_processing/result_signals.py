@@ -18,7 +18,11 @@ from fitting.b_from_g import (
     g_from_b_nogse,
     nogse_rect_b_per_g2,
     nogse_trapezoid_b_per_g2,
+    nogse_x_from_b_per_g2,
 )
+
+# NOGSE x sweep along directions (autox, sequence version v2.00.3): <D>dir<X>x in the Pulseq file name.
+X_SWEEP_NAME = re.compile(r"_\d+dir\d+x_")
 
 
 def norm_key(value: str) -> str:
@@ -153,10 +157,12 @@ class CleanSequenceParams:
     # NOGSE b / g^2 in s/mm^2 per (mT/m)^2, if given in the sequence_parameters row.
     # Kept only for compatibility with older parameter workbooks.
     b_per_g2: float | None = None
+    session_id: str | None = None
 
     def as_columns(self) -> dict[str, object]:
         out = {
             "subj": self.subj,
+            "session_id": self.session_id,
             "sheet": self.sheet,
             "protocol": self.protocol,
             "sequence": self.sequence,
@@ -195,6 +201,7 @@ def grouped_direct_g_output_stem(params: CleanSequenceParams) -> str:
     parts = [
         part("sheet", params.sheet),
         part("subj", params.subj),
+        part("session", params.session_id),
         part("protocol", params.protocol),
         part("group", params.group),
         part("type", params.type),
@@ -261,6 +268,50 @@ def is_nogse_params(params: "CleanSequenceParams") -> bool:
     has_nogse_timing = finite_float(params.TN) is not None and finite_float(params.x) is not None
     has_ogse_timing = finite_float(params.delta_ms) is not None and finite_float(params.Delta_app_ms) is not None
     return has_nogse_timing and not has_ogse_timing
+
+
+def is_x_sweep_params(params: "CleanSequenceParams") -> bool:
+    """NOGSE x sweep (autox, sequence version v2.00.3): G fixed, x varies from volume to volume.
+
+    Recognised by the type ``AUTOX`` of the sequence_parameters row or by a protocol name with
+    ``<D>dir<X>x`` (the Pulseq file names of nogse_pulseq/naming.py).
+    """
+    seq_type = str(params.type or "")
+    return seq_type.strip().upper() == "AUTOX" or bool(X_SWEEP_NAME.search(str(params.protocol or "")))
+
+
+def add_x_sweep_derivatives(df: pd.DataFrame, params: "CleanSequenceParams") -> pd.DataFrame:
+    """g, x and y of every volume of a NOGSE x sweep (autox, sequence version v2.00.3).
+
+    G is the fixed gradient of the sequence_parameters row (mT/m); the b0 volumes (b_step 0) have g = 0.
+    The x of every weighted volume comes from its exact b-value: b / G^2 is inverted with the
+    trapezoidal waveform (N, TN, ramp_time_ms; nogse_x_from_b_per_g2), and y = TN - (N - 1) x.
+    Every b_step must give one x for all directions.
+    """
+    out = ensure_numeric(df.copy(), ["bvalue", "b_step"])
+    G, TN, N, ramp = float(params.G), float(params.TN), int(params.N), float(params.ramp_time_ms)
+    if not all(np.isfinite(v) and v > 0.0 for v in (G, TN, ramp)) or N < 2:
+        raise ValueError(
+            f"An x sweep needs G, TN, N >= 2 and ramp_time_ms in sequence_parameters; got "
+            f"G={G}, TN={TN}, N={N}, ramp_time_ms={ramp}."
+        )
+    weighted = out["b_step"] > 0
+    k_values = out.loc[weighted, "bvalue"].to_numpy(float) / G**2
+    x_by_k = {k: nogse_x_from_b_per_g2(k, N=N, TN_ms=TN, ramp_time_ms=ramp) for k in np.unique(k_values)}
+    out["x"] = np.nan
+    out.loc[weighted, "x"] = [x_by_k[k] for k in k_values]
+    out["y"] = TN - (N - 1) * out["x"]
+    x_per_step = out.loc[weighted].groupby("b_step")["x"].agg(lambda x: np.ptp(x.to_numpy(float)))
+    if (x_per_step > 1e-6).any():
+        raise ValueError(f"x sweep: the directions of one b_step have different x: {x_per_step[x_per_step > 1e-6]}")
+    out["g"] = np.where(weighted, G, 0.0)
+    out["g_max"] = G
+    out["g_lin_max"] = out["g"]
+    out["g_thorsten"] = np.nan
+    out["bvalue_g"] = out["bvalue"]
+    out["bvalue_g_lin_max"] = out["bvalue"]
+    out["bvalue_thorsten"] = np.nan
+    return out
 
 
 def resolve_nogse_b_per_g2(
@@ -500,6 +551,7 @@ def sha256_file(path: Path) -> str:
 def master_analysis_id(df: pd.DataFrame, *, row_kind: str) -> str:
     preferred = (
         "subj",
+        "session_id",
         "sheet",
         "type",
         "protocol",
@@ -524,7 +576,7 @@ def master_analysis_id(df: pd.DataFrame, *, row_kind: str) -> str:
 def filter_existing_to_incoming_curve(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
     out = existing.copy()
 
-    for col in ["sheet", "subj", "type"]:
+    for col in ["sheet", "subj", "session_id", "type"]:
         value = single_text_value(incoming, col)
         if value is not None and col in out.columns:
             out = out.loc[out[col].astype(str).str.strip() == value].copy()
@@ -615,6 +667,7 @@ def extract_clean_sequence_params(row: pd.Series, meta) -> CleanSequenceParams:
         g_thorsten=g_thorsten,
         ramp_time_ms=ramp_time_ms,
         b_per_g2=b_per_g2 if b_per_g2 is not None and b_per_g2 > 0.0 else None,
+        session_id=str(row_get(row, ["session_id"], getattr(meta, "session_id", ""))).strip() or None,
     )
 
 

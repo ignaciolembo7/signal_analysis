@@ -14,6 +14,7 @@ def _master_selectors(args: argparse.Namespace) -> dict[str, object]:
     for arg_name, col_name in [
         ("analysis_id", "analysis_id"),
         ("subj", "subj"),
+        ("session_id", "session_id"),
         ("sheet", "sheet"),
         ("roi", "roi"),
         ("direction", "direction"),
@@ -34,6 +35,7 @@ def main() -> None:
     ap.add_argument("--row-kind", choices=["signal", "signal_rotated"], default="signal_rotated")
     ap.add_argument("--analysis-id", action="append", default=None)
     ap.add_argument("--subj", action="append", default=None)
+    ap.add_argument("--session-id", "--session_id", dest="session_id", action="append", default=None)
     ap.add_argument("--sheet", action="append", default=None)
     ap.add_argument("--roi", action="append", default=None)
     ap.add_argument("--direction", action="append", default=None)
@@ -68,7 +70,7 @@ def main() -> None:
     try:
         exp_id = build_analysis_id_from_columns(
             df,
-            columns=("subj", "sheet", "td_ms", "N", "Hz"),
+            columns=("subj", "session_id", "sheet", "td_ms", "N", "Hz"),
             prefix=args.row_kind,
         )
     except ValueError:

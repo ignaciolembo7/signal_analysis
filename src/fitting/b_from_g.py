@@ -91,7 +91,9 @@ def nogse_trapezoid_b_per_g2(
     The waveform is the one used by the Pulseq NOGSE generator: ``N - 1``
     alternating CPMG lobes of total duration ``x``, followed by a Hahn lobe of
     duration ``y = TN - (N - 1) x``. Both blocks are split around the refocusing
-    pulses, and every lobe has the same linear rise/fall time.
+    pulses, and every lobe has the same linear rise/fall time. ``x = 0`` is the
+    pure Hahn limit of sequence version v2.00.2: no CPMG lobes, two Hahn lobes
+    of ``TN / 2``.
 
     Units are ms, mT/m and rad/(ms*mT); the result is s/mm^2 per (mT/m)^2.
     """
@@ -100,16 +102,20 @@ def nogse_trapezoid_b_per_g2(
     TN_ms, x_ms, ramp_time_ms, gamma = map(float, (TN_ms, x_ms, ramp_time_ms, gamma))
     if not np.isfinite(n_float) or not np.isclose(n_float, n) or n < 2:
         raise ValueError(f"NOGSE N must be an integer >= 2, got {N!r}.")
-    if not all(np.isfinite(v) and v > 0.0 for v in (TN_ms, x_ms, ramp_time_ms, gamma)):
+    if not all(np.isfinite(v) and v > 0.0 for v in (TN_ms, ramp_time_ms, gamma)) or not (
+        np.isfinite(x_ms) and x_ms >= 0.0
+    ):
         raise ValueError(
-            f"NOGSE TN, x, ramp time and gamma must be positive; got "
+            f"NOGSE TN, ramp time and gamma must be positive and x non-negative; got "
             f"TN={TN_ms}, x={x_ms}, ramp={ramp_time_ms}, gamma={gamma}."
         )
 
     y_ms = TN_ms - (n - 1) * x_ms
     half_x = x_ms / 2.0
     half_y = y_ms / 2.0
-    if y_ms <= 0.0 or min(half_x, half_y) < 2.0 * ramp_time_ms:
+    # x = 0 (pure Hahn limit) has no CPMG half-lobe to hold the ramps.
+    shortest = half_y if x_ms == 0.0 else min(half_x, half_y)
+    if y_ms <= 0.0 or shortest < 2.0 * ramp_time_ms:
         raise ValueError(
             f"Invalid trapezoidal NOGSE timing N={n}, TN={TN_ms} ms, x={x_ms} ms, "
             f"y={y_ms} ms, ramp={ramp_time_ms} ms: each half-lobe must be at least 2*ramp."
@@ -117,12 +123,18 @@ def nogse_trapezoid_b_per_g2(
 
     # (duration, sign) pairs, matching the Pulseq generator. A unit gradient is
     # sufficient because b scales quadratically with gradient amplitude.
-    lobes: list[tuple[float, float]] = [(half_x, 1.0)]
-    sign = -1.0
-    for _ in range(n - 2):
-        lobes.append((x_ms, sign))
-        sign *= -1.0
-    lobes.extend([(half_x, sign), (half_y, sign), (half_y, -sign)])
+    if x_ms > 0.0:
+        lobes: list[tuple[float, float]] = [(half_x, 1.0)]
+        sign = -1.0
+        for _ in range(n - 2):
+            lobes.append((x_ms, sign))
+            sign *= -1.0
+        lobes.append((half_x, sign))
+    else:
+        # Pure Hahn limit: the Hahn lobes keep the sign they have for x > 0, (-1)^(N-1).
+        lobes = []
+        sign = -1.0 if n % 2 == 0 else 1.0
+    lobes.extend([(half_y, sign), (half_y, -sign)])
 
     # Integrate q(t)^2 exactly on each linear-gradient segment. If
     # g(t)=g0+a*t, then q(t)=q0+gamma*(g0*t+a*t^2/2).
@@ -168,6 +180,44 @@ def nogse_rect_b_per_g2(*, N: float, TN_ms: float, x_ms: float, gamma: float) ->
     if not (np.isfinite(y_ms) and y_ms >= 0.0 and x_ms >= 0.0 and N >= 1.0):
         raise ValueError(f"Invalid NOGSE timing N={N}, TN={TN_ms} ms, x={x_ms} ms (y={y_ms} ms).")
     return (gamma**2) * ((N - 1.0) * x_ms**3 + y_ms**3) / 12.0 / 1e9
+
+
+def nogse_x_from_b_per_g2(
+    b_per_g2: float,
+    *,
+    N: float,
+    TN_ms: float,
+    ramp_time_ms: float,
+    gamma: float = NOGSE_GAMMA_RAD_PER_MS_MT,
+) -> float:
+    """CPMG period ``x`` (ms) of the played trapezoidal waveform whose exact ``b / g^2`` is ``b_per_g2``.
+
+    Inverse of :func:`nogse_trapezoid_b_per_g2` for an x sweep at fixed g (autox, sequence version
+    v2.00.3): ``b / g^2`` falls monotonically from the pure Hahn limit ``x = 0`` to the CPMG limit
+    ``x = TN / N``. The playable x are 0 and ``[4 ramp, TN / N]`` (each half-lobe holds two ramps);
+    a value between ``b/g^2(4 ramp)`` and ``b/g^2(0)`` has no x and is rejected.
+    """
+    from scipy.optimize import brentq
+
+    def k(x_ms: float) -> float:
+        return nogse_trapezoid_b_per_g2(N=N, TN_ms=TN_ms, x_ms=x_ms, ramp_time_ms=ramp_time_ms, gamma=gamma)
+
+    value = float(b_per_g2)
+    if np.isclose(value, k(0.0), rtol=1e-6, atol=0.0):
+        return 0.0
+    lo, hi = 4.0 * float(ramp_time_ms), float(TN_ms) / float(N)
+    k_lo, k_hi = k(lo), k(hi)
+    if not k_hi * (1.0 - 1e-6) <= value <= k_lo * (1.0 + 1e-6):
+        raise ValueError(
+            f"b/g^2 = {value:.9g} s/mm^2 per (mT/m)^2 matches no playable x for N={N}, TN={TN_ms} ms, "
+            f"ramp={ramp_time_ms} ms (x = 0: {k(0.0):.9g}; x in [{lo:g}, {hi:g}] ms: [{k_hi:.9g}, {k_lo:.9g}])."
+        )
+    value = min(max(value, k_hi), k_lo)
+    if value == k_lo:
+        return lo
+    if value == k_hi:
+        return hi
+    return float(brentq(lambda x_ms: k(x_ms) - value, lo, hi, xtol=1e-9))
 
 
 def b_from_g_nogse(g_mTm: np.ndarray, *, b_per_g2: float) -> np.ndarray:
@@ -394,6 +444,7 @@ __all__ = [
     "NOGSE_GAMMA_RAD_PER_MS_MT",
     "nogse_rect_b_per_g2",
     "nogse_trapezoid_b_per_g2",
+    "nogse_x_from_b_per_g2",
     "normalize_axis_base",
     "split_axis_side",
 ]
